@@ -1,0 +1,26 @@
+
+# folders
+/!Archieved/
+_other/
+BLE_scanner/
+Ambience_Data/
+ESP32_TFT_library/
+gatt_client/
+gatt_client_new/
+ssd1306-esp-idf-i2c/
+WebSockets-on-the-ESP32-master_2/
+
+.config
+*.o
+*.pyc
+*.d
+**/build/
+.cproject
+.project
+.settings
+
+# eclipse setting
+.settings
+
+#build/
+#sdkconfig.old

@@ -1,0 +1,6 @@
+broken sensor output:
+
+23.44*C
+227790.25 (Pascals)
+67.45 Inches (Hg)
+60896.81 meters
