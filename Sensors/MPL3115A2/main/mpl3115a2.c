@@ -1,5 +1,5 @@
 /********************************** MPL3115A2 **********************************
- * @dataseet:  http://www.nxp.com/docs/en/data-sheet/MPL3115A2.pdf
+ * @datashet:  http://www.nxp.com/docs/en/data-sheet/MPL3115A2.pdf
  * @appnote1:  http://cache.freescale.com/files/sensors/doc/app_note/AN4519.pdf
  * @appnote2:  https://cache.nxp.com/docs/en/application-note/AN4481.pdf
  ******************************************************************************/
