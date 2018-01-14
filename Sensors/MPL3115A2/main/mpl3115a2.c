@@ -3,6 +3,7 @@
  * @appnote1:  http://cache.freescale.com/files/sensors/doc/app_note/AN4519.pdf
  * @appnote2:  https://cache.nxp.com/docs/en/application-note/AN4481.pdf
  ******************************************************************************/
+ 
 #include <stdio.h>
 #include <string.h>
 #include "driver/i2c.h"
