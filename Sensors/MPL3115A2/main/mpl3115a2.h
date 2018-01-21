@@ -7,7 +7,7 @@
  * @appnote2:  https://cache.nxp.com/docs/en/application-note/AN4481.pdf
  ******************************************************************************/
 //--------------------- MPL3115A2 registers
-#define MPL3115A2_ADDR                 0xC0    //0xC0     //(0xC0 >>1)
+#define MPL3115A2_ADDR                 0xC0    //(0xC0 >>1)
 #define MPL3115A2_R_STATUS             0x00
 #define MPL3115A2_STATUS_DATA_READY    0x08
 #define MPL3115A2_STATUS_PRESS_READY   0x04
@@ -32,6 +32,9 @@
 #define MPL3115A2_CTRL1_START          0x02
 #define MPL3115A2_CTRL1_ACTIVATE       0x01
 //-----------------------------------------
+#define MPL3115A2_MODE_ALTIMETER       0xB9
+#define MPL3115A2_MODE_BAROMETER       0x39
+//-----------------------------------------
 #define MPL_ERR                        0x00
 #define MPL_OK                         0x01
 //-----------------------------------------
@@ -39,8 +42,10 @@
 //---------------------- FUNCTION PROTOTYPES
 
 void i2c_master_initialize(void);
-uint8_t mpl3115a2_test(void);
-static esp_err_t MPL3115A2_RegWrite(uint8_t reg_wr, uint8_t val_wr);
-static esp_err_t MPL3115A2_RegRead(uint8_t reg_rd, uint8_t* data_rd);
+uint8_t MPL3115A2_test(void);
+uint8_t MPL3115A2_initialize(void);
+uint8_t MPL3115A2_getData(float* pPress, float* pTemp);
+static esp_err_t MPL3115A2_regWrite(uint8_t reg_wr, uint8_t val_wr);
+static esp_err_t MPL3115A2_regRead(uint8_t reg_rd, uint8_t* data_rd);
 
 #endif // __H_MPL3115A2_H__
