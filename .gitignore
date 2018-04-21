@@ -1,3 +1,5 @@
+#self gitignore
+.gitignore
 
 # folders
 /!Archieved/
