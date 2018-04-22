@@ -106,9 +106,9 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 //		    printf("%s\n", buf); //debug
 //		    sprintf(spp_data, "Received bytes:%d\n\nData:%s\n", param->data_ind.len, buf);
 //		    esp_spp_write(param->write.handle, strlen(spp_data), (uint8_t *)spp_data);
-		    snprintf((char*)FlowMeterData.SPP_Buf, (size_t)param->data_ind.len, (char *)param->data_ind.data);
-		    FlowMeterData.SPP_len = param->data_ind.len;
-		    FlowMeterData.SPP_got_packet = true;
+            snprintf((char*)FlowMeterData.SPP_Buf, (size_t)param->data_ind.len, (char *)param->data_ind.data);
+            FlowMeterData.SPP_len = param->data_ind.len;
+            FlowMeterData.SPP_got_packet = true;
 
 		    if(FlowMeterData.UART_got_packet == true)
 		    {
@@ -160,12 +160,18 @@ static void usart_task()
     uart_driver_install(UART_NUM_1, BUF_SIZE * 2, 0, 0, NULL, 0);
 
     // Configure a temporary buffer for the incoming data
-    uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
+    //uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
 
     while (1) {
         // Read data from the UART
         //int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 20 / portTICK_RATE_MS);
-    	FlowMeterData.UART_len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 20 / portTICK_RATE_MS);
+    	int len = uart_read_bytes(UART_NUM_1, FlowMeterData.UART_Buf, BUF_SIZE, 20 / portTICK_RATE_MS);
+
+    	if(len > 0)
+    	{
+    		FlowMeterData.UART_len = len;
+            FlowMeterData.UART_got_packet = true;
+    	}
 
     	if(FlowMeterData.SPP_got_packet == true)
     	{
@@ -176,6 +182,8 @@ static void usart_task()
     }
 }
 
+
+//ToDO: fix bug: need to send something via UART to receive data in SPP
 void app_main()
 {
     esp_err_t ret = nvs_flash_init();
