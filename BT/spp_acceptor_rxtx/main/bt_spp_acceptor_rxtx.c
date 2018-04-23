@@ -21,6 +21,7 @@
 #include "esp_bt_device.h"
 #include "esp_spp_api.h"
 #include "driver/uart.h"
+#include "driver/gpio.h"
 
 #include "time.h"
 #include "sys/time.h"
@@ -28,13 +29,12 @@
 #define SPP_TAG "SPP_RXTX"
 #define SPP_SERVER_NAME "SPP_SERVER"
 #define DEVICE_NAME "ESP_SPP_RXTX"
-#define SPP_SHOW_DATA 0
-#define SPP_SHOW_SPEED 1
-#define SPP_SHOW_MODE SPP_SHOW_DATA    /*Choose show mode: show data or speed*/
-#define USART_TXD  (GPIO_NUM_18)
-#define USART_RXD  (GPIO_NUM_5)
+#define USART_TXD  (GPIO_NUM_18) // to DI
+#define USART_RXD  (GPIO_NUM_5) // to RO
 #define USART_RTS  (UART_PIN_NO_CHANGE)
 #define USART_CTS  (UART_PIN_NO_CHANGE)
+#define RS485_RE   (GPIO_NUM_17) // low:  active RO (to external RX)
+#define RS485_DE   (GPIO_NUM_16) // high: active DI (to external TX)
 
 #define BUF_SIZE (1024)
 
@@ -51,24 +51,9 @@ typedef struct FlowMeterData_s
 FlowMeterData_t FlowMeterData;
 
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
-
-static struct timeval time_new, time_old;
-static long data_num = 0;
-
 static const esp_spp_sec_t sec_mask = ESP_SPP_SEC_NONE;
 static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
 
-static void print_speed(void)
-{
-    float time_old_s = time_old.tv_sec + time_old.tv_usec / 1000000.0;
-    float time_new_s = time_new.tv_sec + time_new.tv_usec / 1000000.0;
-    float time_interval = time_new_s - time_old_s;
-    float speed = data_num * 8 / time_interval / 1000.0;
-    ESP_LOGI(SPP_TAG, "speed(%fs ~ %fs): %f kbit/s" , time_old_s, time_new_s, speed);
-    data_num = 0;
-    time_old.tv_sec = time_new.tv_sec;
-    time_old.tv_usec = time_new.tv_usec;
-}
 
 static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
@@ -97,7 +82,6 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         ESP_LOGI(SPP_TAG, "ESP_SPP_CL_INIT_EVT");
         break;
     case ESP_SPP_DATA_IND_EVT:
-#if (SPP_SHOW_MODE == SPP_SHOW_DATA)
         ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len=%d handle=%d",
                  param->data_ind.len, param->data_ind.handle);
         if (param->data_ind.len < 1023)
@@ -110,24 +94,17 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
             FlowMeterData.SPP_len = param->data_ind.len;
             FlowMeterData.SPP_got_packet = true;
 
-		    if(FlowMeterData.UART_got_packet == true)
-		    {
-		    	esp_spp_write(param->write.handle, FlowMeterData.UART_len, (uint8_t *)FlowMeterData.UART_Buf);
-		    	FlowMeterData.UART_got_packet = false;
-		    }
+            if(FlowMeterData.UART_got_packet == true)
+            {
+            	esp_spp_write(param->write.handle, FlowMeterData.UART_len, (uint8_t *)FlowMeterData.UART_Buf);
+            	FlowMeterData.UART_got_packet = false;
+            }
 
         }
         else
         {
-            esp_log_buffer_hex("",param->data_ind.data,param->data_ind.len);
+        	esp_log_buffer_hex("",param->data_ind.data,param->data_ind.len);
         }
-#else
-        gettimeofday(&time_new, NULL);
-        data_num += param->data_ind.len;
-        if (time_new.tv_sec - time_old.tv_sec >= 3) {
-            print_speed();
-        }
-#endif
         break;
     case ESP_SPP_CONG_EVT:
         ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
@@ -137,17 +114,45 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         break;
     case ESP_SPP_SRV_OPEN_EVT:
         ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT");
-        gettimeofday(&time_old, NULL);
         break;
     default:
         break;
     }
 }
 
-static void usart_task()
+
+
+void RS485_pins_init(void)
 {
-    /* Configure parameters of an UART driver,
-     * communication pins and install the driver */
+	gpio_pad_select_gpio(RS485_RE);
+	gpio_pad_select_gpio(RS485_DE);
+
+	gpio_set_direction(RS485_RE, GPIO_MODE_OUTPUT);
+	gpio_set_direction(RS485_DE, GPIO_MODE_OUTPUT);
+
+	gpio_set_level(RS485_RE, 0);
+	gpio_set_level(RS485_DE, 0);
+}
+
+void RS485_send_data(void)//( uint8_t *data, uint16_t len)
+{
+	gpio_set_level(RS485_RE, 1);
+	gpio_set_level(RS485_DE, 1);
+
+	vTaskDelay(5 / portTICK_PERIOD_MS);
+
+	uart_write_bytes(UART_NUM_1, (const char *) FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+
+	vTaskDelay(5 / portTICK_PERIOD_MS);
+
+	gpio_set_level(RS485_RE, 0);
+	gpio_set_level(RS485_DE, 0);
+}
+
+static void RS485_task()
+{
+    RS485_pins_init();
+
     uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -175,12 +180,15 @@ static void usart_task()
 
     	if(FlowMeterData.SPP_got_packet == true)
     	{
-            uart_write_bytes(UART_NUM_1, (const char *) FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+    		RS485_send_data();
+            //uart_write_bytes(UART_NUM_1, (const char *) FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
             FlowMeterData.SPP_got_packet = false;
     	}
 
     }
 }
+
+
 
 
 //ToDO: fix bug: need to send something via UART to receive data in SPP
@@ -225,5 +233,6 @@ void app_main()
         return;
     }
 
-    xTaskCreate(usart_task, "usart_echo_task", 1024, NULL, 10, NULL);
+    // RS485
+    xTaskCreate(RS485_task, "RS485_task", 1024, NULL, 10, NULL);
 }
