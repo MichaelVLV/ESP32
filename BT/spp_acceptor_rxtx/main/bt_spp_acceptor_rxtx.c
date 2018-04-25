@@ -22,11 +22,21 @@
 #include "esp_spp_api.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+//---------------------
+#include "esp_wifi.h"
+#include "freertos/event_groups.h"
+#include "esp_event_loop.h"
+#include "lwip/err.h"
+#include "lwip/sys.h"
 
 #include "time.h"
 #include "sys/time.h"
 
-#define SPP_TAG "SPP_RXTX"
+#define WIFI_SSID "WIFI_RS485"
+#define WIFI_PASS "12345678"
+#define WIFI_TAG WIFI_SSID
+
+#define SPP_TAG "SPP_RS485"
 #define SPP_SERVER_NAME "SPP_SERVER"
 #define DEVICE_NAME "ESP_SPP_RXTX"
 #define USART_TXD  (GPIO_NUM_18) // to DI
@@ -36,7 +46,7 @@
 #define RS485_RE   (GPIO_NUM_17) // low:  active RO (to external RX)
 #define RS485_DE   (GPIO_NUM_16) // high: active DI (to external TX)
 
-#define BUF_SIZE (1024)
+#define BUF_SIZE (512)
 
 typedef struct FlowMeterData_s
 {
@@ -90,7 +100,8 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 //		    printf("%s\n", buf); //debug
 //		    sprintf(spp_data, "Received bytes:%d\n\nData:%s\n", param->data_ind.len, buf);
 //		    esp_spp_write(param->write.handle, strlen(spp_data), (uint8_t *)spp_data);
-            snprintf((char*)FlowMeterData.SPP_Buf, (size_t)param->data_ind.len, (char *)param->data_ind.data);
+
+        	memcpy(FlowMeterData.SPP_Buf,param->data_ind.data, (size_t)param->data_ind.len);
             FlowMeterData.SPP_len = param->data_ind.len;
             FlowMeterData.SPP_got_packet = true;
 
@@ -99,7 +110,6 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
             	esp_spp_write(param->write.handle, FlowMeterData.UART_len, (uint8_t *)FlowMeterData.UART_Buf);
             	FlowMeterData.UART_got_packet = false;
             }
-
         }
         else
         {
@@ -120,6 +130,10 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
     }
 }
 
+void SPP_write(esp_spp_cb_param_t *param)
+{
+	esp_spp_write(param->write.handle, FlowMeterData.UART_len, (uint8_t *)FlowMeterData.UART_Buf);
+}
 
 
 void RS485_pins_init(void)
@@ -134,16 +148,16 @@ void RS485_pins_init(void)
 	gpio_set_level(RS485_DE, 0);
 }
 
-void RS485_send_data(void)//( uint8_t *data, uint16_t len)
+void RS485_send_data(void)
 {
 	gpio_set_level(RS485_RE, 1);
 	gpio_set_level(RS485_DE, 1);
 
-	vTaskDelay(5 / portTICK_PERIOD_MS);
+	vTaskDelay(10 / portTICK_PERIOD_MS);
 
-	uart_write_bytes(UART_NUM_1, (const char *) FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+	uart_write_bytes(UART_NUM_1, (char*)FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
 
-	vTaskDelay(5 / portTICK_PERIOD_MS);
+	vTaskDelay(10 / portTICK_PERIOD_MS);
 
 	gpio_set_level(RS485_RE, 0);
 	gpio_set_level(RS485_DE, 0);
@@ -162,7 +176,7 @@ static void RS485_task()
     };
     uart_param_config(UART_NUM_1, &uart_config);
     uart_set_pin(UART_NUM_1, USART_TXD, USART_RXD, USART_RTS, USART_CTS);
-    uart_driver_install(UART_NUM_1, BUF_SIZE * 2, 0, 0, NULL, 0);
+    uart_driver_install(UART_NUM_1, BUF_SIZE, BUF_SIZE, 0, NULL, 0);
 
     // Configure a temporary buffer for the incoming data
     //uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
@@ -176,6 +190,8 @@ static void RS485_task()
     	{
     		FlowMeterData.UART_len = len;
             FlowMeterData.UART_got_packet = true;
+            //SPP_write();
+
     	}
 
     	if(FlowMeterData.SPP_got_packet == true)
@@ -188,10 +204,74 @@ static void RS485_task()
     }
 }
 
+/* FreeRTOS event group to signal when we are connected*/
+static EventGroupHandle_t wifi_event_group;
+/* The event group allows multiple bits for each event,
+   but we only care about one event - are we connected
+   to the AP with an IP? */
+const int WIFI_CONNECTED_BIT = BIT0;
 
+static esp_err_t event_handler(void *ctx, system_event_t *event)
+{
+    switch(event->event_id) {
+    case SYSTEM_EVENT_STA_START:
+        esp_wifi_connect();
+        break;
+    case SYSTEM_EVENT_STA_GOT_IP:
+        ESP_LOGI(WIFI_TAG, "got ip:%s",
+                 ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
+        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        break;
+    case SYSTEM_EVENT_AP_STACONNECTED:
+        ESP_LOGI(WIFI_TAG, "station:"MACSTR" join, AID=%d",
+                 MAC2STR(event->event_info.sta_connected.mac),
+                 event->event_info.sta_connected.aid);
+        break;
+    case SYSTEM_EVENT_AP_STADISCONNECTED:
+        ESP_LOGI(WIFI_TAG, "station:"MACSTR"leave, AID=%d",
+                 MAC2STR(event->event_info.sta_disconnected.mac),
+                 event->event_info.sta_disconnected.aid);
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        esp_wifi_connect();
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        break;
+    default:
+        break;
+    }
+    return ESP_OK;
+}
 
+void wifi_init_softap()
+{
+    wifi_event_group = xEventGroupCreate();
 
-//ToDO: fix bug: need to send something via UART to receive data in SPP
+    tcpip_adapter_init();
+    ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = WIFI_SSID,
+            .ssid_len = strlen(WIFI_SSID),
+            .password = WIFI_PASS,
+            .max_connection = 2,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK
+        },
+    };
+    if (strlen(WIFI_PASS) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    }
+    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(WIFI_TAG, "wifi_init_softap finished.SSID:%s password:%s",
+             WIFI_SSID, WIFI_PASS);
+}
+
 void app_main()
 {
     esp_err_t ret = nvs_flash_init();
@@ -232,6 +312,10 @@ void app_main()
         ESP_LOGE(SPP_TAG, "%s spp init failed\n", __func__);
         return;
     }
+
+//    //WIFI
+    ESP_LOGI(WIFI_TAG, "ESP_WIFI_MODE_AP");
+    wifi_init_softap();
 
     // RS485
     xTaskCreate(RS485_task, "RS485_task", 1024, NULL, 10, NULL);
