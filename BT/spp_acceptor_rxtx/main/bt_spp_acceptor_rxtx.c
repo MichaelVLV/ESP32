@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "esp_spi_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -39,18 +40,23 @@
 #define WIFI_TAG   WIFI_SSID
 
 #define TCP_TAG "TCP"
-#define TCP_PORT 333
+#define TCP_PORT 333 // for netconn server
+#define TCP_SERVER_IP   "192.168.4.1"
+#define TCP_SERVER_PORT  333
 
-#define SPP_TAG "SPP_RS485"
+#define DEVICE_NAME     "BT_RS485"
+#define SPP_TAG          DEVICE_NAME
 #define SPP_SERVER_NAME "SPP_SERVER"
-#define DEVICE_NAME "ESP_SPP_RXTX"
+
+#define RS485_UART  UART_NUM_1
 #define USART_TXD  (GPIO_NUM_18) // to DI
-#define USART_RXD  (GPIO_NUM_5) // to RO
+#define USART_RXD  (GPIO_NUM_5)  // to RO
 #define USART_RTS  (UART_PIN_NO_CHANGE)
 #define USART_CTS  (UART_PIN_NO_CHANGE)
-#define RS485_UART  UART_NUM_1
 #define RS485_RE   (GPIO_NUM_17) // low:  active RO (to external RX)
 #define RS485_DE   (GPIO_NUM_16) // high: active DI (to external TX)
+
+#define EXAMPLE_DEFAULT_PKTSIZE 1460
 
 #define BUF_SIZE (512)
 
@@ -78,11 +84,16 @@ typedef enum RS485_DataBuffer_e
 
 FlowMeterData_t FlowMeterData = {0};
 
+
+static int connect_socket = 0;
+
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const esp_spp_sec_t sec_mask = ESP_SPP_SEC_NONE;
 static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
 
 uint32_t gl_spp_handle;
+struct netconn *gl_tcp_conn;
+
 static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
     switch (event) {
@@ -157,7 +168,6 @@ void SPP_to_UART_write(esp_spp_cb_param_t *param)
 	ESP_LOGI(SPP_TAG, "SPP_to_UART_write len:%d\n data:%s", FlowMeterData.UART_len, (uint8_t *)FlowMeterData.UART_Buf);
 }
 
-
 void RS485_pins_init(void)
 {
 	gpio_pad_select_gpio(RS485_RE);
@@ -170,6 +180,7 @@ void RS485_pins_init(void)
 	gpio_set_level(RS485_DE, 0);
 }
 
+// sending buffers to UART
 void RS485_send_data(RS485_DataBuffer_t buffToSend)
 {
 	gpio_set_level(RS485_RE, 1);
@@ -229,14 +240,22 @@ static void RS485_task()
     		FlowMeterData.UART_len = len;
             FlowMeterData.UART_got_packet = true;
 
+            // send data directly to SPP
             if(FlowMeterData.SPP_conn == true)
             {
                 esp_spp_cb_param_t spp_param;
                 spp_param.open.handle = gl_spp_handle;
                 SPP_to_UART_write(&spp_param);
             }
+            else if (FlowMeterData.TCP_conn == true)
+			{
+            	// send UART data to TCP
+            	//netconn_write(gl_tcp_conn, FlowMeterData.TCP_Buf, FlowMeterData.TCP_len, NETCONN_NOCOPY);
+            	send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
+			}
     	}
 
+    	//send data from SPP to UART
     	if(FlowMeterData.SPP_got_packet == true)
     	{
     		RS485_send_data(E_SPP_BUFFER);
@@ -258,6 +277,7 @@ static EventGroupHandle_t wifi_event_group;
    to the AP with an IP? */
 const int WIFI_CONNECTED_BIT = BIT0;
 
+//wifi events
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
     switch(event->event_id) {
@@ -282,6 +302,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     case SYSTEM_EVENT_STA_DISCONNECTED:
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+
         break;
     default:
         break;
@@ -319,27 +340,40 @@ void wifi_init_softap()
              WIFI_SSID, WIFI_PASS);
 }
 
-static void netconn_serve(struct netconn *conn)
+
+static void netconn_handler(struct netconn *conn)
 {
 	struct netbuf *inbuf;
 	char *buf;
-	u16_t buflen;
+	uint16_t buflen;
 	err_t err;
 
 	err = netconn_recv(conn, &inbuf);
+	//gl_tcp_conn = conn;//test
+    //printf("net connection received\n");
 
-	if (err == ERR_OK)
+	if(err == ERR_OK)
 	{
 		netbuf_data(inbuf, (void**)&buf, &buflen);
 
-		// extract the first line, with the request
-		//char *first_line = strtok(buf, "\n");
 		memcpy(FlowMeterData.TCP_Buf, buf, buflen);
+		FlowMeterData.TCP_conn = true;
+		FlowMeterData.TCP_len = buflen;
 		FlowMeterData.TCP_got_packet = true;
-		RS485_send_data(E_TCP_BUFFER);
 
-		if(buf)
-		{
+		ESP_LOGI(TCP_TAG, "TCP_to_UART_write len:%d\n data:%s", FlowMeterData.TCP_len, (uint8_t *)FlowMeterData.TCP_Buf);
+		RS485_send_data(E_TCP_BUFFER);
+		//printf("RS485_send_data sent\n");
+
+        if (FlowMeterData.UART_got_packet == true)
+        {
+        	FlowMeterData.UART_got_packet = false;
+        	netconn_write(conn, FlowMeterData.TCP_Buf, FlowMeterData.TCP_len, NETCONN_NOCOPY);
+        	ESP_LOGI(TCP_TAG, "TCP_to_UART_write len:%d\n data:%s", FlowMeterData.TCP_len, (uint8_t *)FlowMeterData.TCP_Buf);
+        }
+	}
+//		if(buf)
+//		{
 //			netconn_write(conn, FlowMeterData.TCP_Buf, FlowMeterData.TCP_len, NETCONN_NOCOPY);
 //			FlowMeterData.TCP_got_packet = true;
 //			RS485_send_data(E_TCP_BUFFER);
@@ -359,24 +393,27 @@ static void netconn_serve(struct netconn *conn)
 //			{
 //				printf("Unkown request: %s\n", first_line);
 //			}
-		}
-		else printf("Unkown request\n");
-	}
+//		}
+//		else printf("Unkown request\n");
+//	}
 
 	// close the connection and free the buffer
-	netconn_close(conn);
+	//netconn_close(conn);
+	//FlowMeterData.TCP_conn = false;
+	//printf("connection in conn handler closed\n");
 	netbuf_delete(inbuf);
 }
 
-static void tcp_server(void *pvParameters) {
-
+static void tcp_server_task(void *pvParameters)
+{
 	struct netconn *conn, *newconn;
 	err_t err;
 	conn = netconn_new(NETCONN_TCP);
 	netconn_bind(conn, NULL, TCP_PORT);
 	netconn_listen(conn);
 	printf("TCP Server listening port:%d\n",TCP_PORT);
-	do {
+	do
+	{
 		err = netconn_accept(conn, &newconn);
 		printf("New client connected\n");
 		if (err == ERR_OK) {
@@ -386,19 +423,288 @@ static void tcp_server(void *pvParameters) {
 //			printf("RS485_SPP sent\n");
 //			RS485_send_data(E_TCP_CHANNEL);
 //			printf("RS485_TCP sent\n");
-			netconn_serve(newconn);
-			netconn_delete(newconn);
+			//printf("Process connection\n");
+			netconn_handler(newconn);
+			FlowMeterData.TCP_conn = false;
+			//printf("Process connection\n");
+			//netconn_delete(newconn);
+			//printf("net connection deleted\n");
 		}
 		vTaskDelay(1); //allows task to be pre-empted
 	} while(err == ERR_OK);
-	printf("Closing tcp\n");
+	printf("Closing tcpOut\n");
 	netconn_close(conn);
 	netconn_delete(conn);
 	printf("\n");
 }
 
+
+int get_socket_error_code(int socket)
+{
+    int result;
+    u32_t optlen = sizeof(int);
+    if(getsockopt(socket, SOL_SOCKET, SO_ERROR, &result, &optlen) == -1) {
+	ESP_LOGE(TCP_TAG, "getsockopt failed");
+	return -1;
+    }
+    return result;
+}
+
+int show_socket_error_reason(int socket)
+{
+    int err = get_socket_error_code(socket);
+    ESP_LOGW(TCP_TAG, "socket error %d %s", err, strerror(err));
+    return err;
+}
+
+int total_data = 0;
+static int server_socket = 0;
+//receive data tcp (snippet)
+void recv_data(void *pvParameters)
+{
+    int len = 0;
+    char databuff[EXAMPLE_DEFAULT_PKTSIZE];
+    while (1)
+    {
+		len = recv(connect_socket, databuff, EXAMPLE_DEFAULT_PKTSIZE, 0);
+		FlowMeterData.TCP_len = len;
+		if (len > 0) {
+			total_data += len;
+			memcpy(FlowMeterData.TCP_Buf, databuff, FlowMeterData.TCP_len);
+			printf("FL_len:%d, FL_data:%s\n", FlowMeterData.TCP_len, FlowMeterData.TCP_Buf);
+			FlowMeterData.TCP_got_packet = true;
+		}
+		else
+		{
+			if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
+				show_socket_error_reason(connect_socket);
+			}
+			vTaskDelay(100 / portTICK_RATE_MS);
+		}
+    }
+}
+
+//send data tcp (snippet)
+void send_data(void *pvParameters)
+{
+    int len = 0;
+    char databuff[EXAMPLE_DEFAULT_PKTSIZE];
+    memset(databuff, 'D', EXAMPLE_DEFAULT_PKTSIZE);
+    vTaskDelay(100/portTICK_RATE_MS);
+    ESP_LOGI(TCP_TAG, "start sending...");
+#if EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO
+    //delaytime
+    struct timeval tv_start;
+    struct timeval tv_finish;
+    unsigned long send_delay_ms;
+#endif /*EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO*/
+    while(1) {
+
+#if EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO
+    	total_pack++;
+    	gettimeofday(&tv_start, NULL);
+#endif /*EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO*/
+
+	//send function
+    	len = send(connect_socket, databuff, EXAMPLE_DEFAULT_PKTSIZE, 0);
+
+#if EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO
+    	gettimeofday(&tv_finish, NULL);
+#endif /*EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO*/
+	if(len > 0) {
+	    total_data += len;
+
+#if EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO
+	    send_success++;
+	    send_delay_ms = (tv_finish.tv_sec - tv_start.tv_sec) * 1000
+		+ (tv_finish.tv_usec - tv_start.tv_usec) / 1000;
+	    if(send_delay_ms < 30)
+		delay_classify[0]++;
+	    else if(send_delay_ms < 100)
+		delay_classify[1]++;
+	    else if(send_delay_ms < 300)
+		delay_classify[2]++;
+	    else if(send_delay_ms < 1000)
+		delay_classify[3]++;
+	    else
+		delay_classify[4]++;
+#endif /*EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO*/
+
+	} else {
+
+#if EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO
+	    send_fail++;
+#endif /*EXAMPLE_ESP_TCP_PERF_TX && EXAMPLE_ESP_TCP_DELAY_INFO*/
+
+	    if (LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG) {
+	    	show_socket_error_reason(connect_socket);
+	    }
+	} /*if(len > 0)*/
+    }
+}
+
+void close_socket()
+{
+    close(connect_socket);
+    close(server_socket);
+}
+
+static struct sockaddr_in server_addr;
+static struct sockaddr_in client_addr;
+static unsigned int socklen = sizeof(client_addr);
+
+//use this esp32 as a tcp server. return ESP_OK:success ESP_FAIL:error
+esp_err_t create_tcp_server()
+{
+    ESP_LOGI(TCP_TAG, "server socket....port=%d\n", TCP_SERVER_PORT);
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+    	show_socket_error_reason(server_socket);
+    	return ESP_FAIL;
+    }
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(TCP_SERVER_PORT);
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+    	show_socket_error_reason(server_socket);
+    	close(server_socket);
+    	return ESP_FAIL;
+    }
+    if (listen(server_socket, 5) < 0) {
+    	show_socket_error_reason(server_socket);
+    	close(server_socket);
+    	return ESP_FAIL;
+    }
+    connect_socket = accept(server_socket, (struct sockaddr*)&client_addr, &socklen);
+    if (connect_socket<0) {
+    	show_socket_error_reason(connect_socket);
+    	close(server_socket);
+    	return ESP_FAIL;
+    }
+    /*connection established now can send/recv*/
+    FlowMeterData.TCP_conn = true;
+    ESP_LOGI(TCP_TAG, "tcp connection established!");
+    ESP_LOGI(TCP_TAG, "socket:%d", server_socket);
+    return ESP_OK;
+}
+
+int check_working_socket()
+{
+    int ret;
+    ESP_LOGD(TCP_TAG, "check server_socket");
+    ret = get_socket_error_code(server_socket);
+    if(ret != 0) {
+    	ESP_LOGW(TCP_TAG, "server socket error %d %s", ret, strerror(ret));
+    }
+    if(ret == ECONNRESET)
+    {
+    	return ret;
+    }
+    ESP_LOGD(TCP_TAG, "check connect_socket");
+    ret = get_socket_error_code(connect_socket);
+    if(ret != 0) {
+    	ESP_LOGW(TCP_TAG, "connect socket error %d %s", ret, strerror(ret));
+    }
+    if(ret != 0) return ret;
+    return 0;
+}
+
+/* FreeRTOS event group to signal when we are connected to wifi */
+EventGroupHandle_t tcp_event_group;
+bool tcp_server_task_restart; // TRUE: restart task
+static void tcp_server2_task(void *pvParameters)
+{
+    ESP_LOGI(TCP_TAG, "task tcp_conn.");
+    tcp_server_task_restart = false;
+    /*create tcp socket*/
+    int socket_ret;
+
+    ESP_LOGI(TCP_TAG, "tcp_server will start after 3s!");
+    vTaskDelay(3000 / portTICK_RATE_MS);
+    ESP_LOGI(TCP_TAG, "creating tcp server...");
+    socket_ret=create_tcp_server();
+
+    if(socket_ret == ESP_FAIL) {
+		ESP_LOGI(TCP_TAG, "create tcp socket error,stop.");
+		FlowMeterData.TCP_conn = false;
+		vTaskDelete(NULL);
+    }
+
+    /*create a task to tx/rx data*/
+    //TaskHandle_t tx_rx_task;
+    //xTaskCreate(&send_data, "send_data", 4096, NULL, 4, &tx_rx_task);
+    //xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task);
+
+    while (!tcp_server_task_restart)
+    {
+    	uint8_t databuff[EXAMPLE_DEFAULT_PKTSIZE];
+		int len = recv(connect_socket, databuff, EXAMPLE_DEFAULT_PKTSIZE, 0);
+		FlowMeterData.TCP_len = len;
+		if (len > 0)
+		{
+			memcpy(FlowMeterData.TCP_Buf, databuff, FlowMeterData.TCP_len);
+			printf("FL_len:%d, FL_data:%s\n", FlowMeterData.TCP_len, FlowMeterData.TCP_Buf); // debug
+			FlowMeterData.TCP_got_packet = true;
+		}
+
+    	vTaskDelay(10 / portTICK_RATE_MS);//every 10ms
+
+		if (len <= 0)
+		{
+			int err_ret = check_working_socket();
+			if (err_ret == ECONNRESET || ECONNABORTED)
+			{
+				ESP_LOGW(TCP_TAG, "tcp disconnected... stop.\n");
+				printf("Code:%d\n", err_ret);
+				break;
+			}
+		}
+    }
+    close_socket();
+    printf("socket closed\n");
+    FlowMeterData.TCP_conn = false;
+    tcp_server_task_restart = true;
+    //vTaskDelete(tx_rx_task);
+    vTaskDelete(NULL);
+}
+
+static void watch_tcp_srv_task(void *pvParameters)
+{
+  while(1)
+  {
+	  if(tcp_server_task_restart == true)
+	  {
+		  printf("TCP task is RESTARTING\n\n");
+	      xTaskCreate(&tcp_server2_task,"tcp_server2_task", 4096, NULL, 5, NULL);
+	  }
+
+	  vTaskDelay(1000 / portTICK_RATE_MS);//every 1s
+  }
+}
+
+
+void print_chip_inform(void)
+{
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+    printf("This is ESP32 chip with %d CPU cores, WiFi%s%s, ",
+            chip_info.cores,
+            (chip_info.features & CHIP_FEATURE_BT) ? "/BT" : "",
+            (chip_info.features & CHIP_FEATURE_BLE) ? "/BLE" : "");
+
+    printf("silicon revision %d, ", chip_info.revision);
+
+    printf("%dMB %s flash\n", spi_flash_get_chip_size() / (1024 * 1024),
+            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
+    uint8_t chipid[6];
+    esp_efuse_read_mac(&chipid);
+    printf("ID:%02X_%02X_%02X_%02X_%02X_%02X\n",chipid[0], chipid[1], chipid[2], chipid[3], chipid[4], chipid[5]);
+}
+
 void app_main()
 {
+	print_chip_inform();
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -443,6 +749,8 @@ void app_main()
     wifi_init_softap();
 
     // RS485
-    xTaskCreate(RS485_task, "RS485_task", 1024, NULL, 10, NULL);
-    xTaskCreate(&tcp_server,"tcp_server", 4096, NULL, 5, NULL);
+    xTaskCreate(RS485_task, "RS485_task", 4*1024, NULL, 10, NULL);
+    //xTaskCreate(&tcp_server_task,"tcp_server_task", 4096, NULL, 5, NULL);
+    xTaskCreate(&tcp_server2_task,"tcp_server2_task", 4096, NULL, 5, NULL);
+    xTaskCreate(&watch_tcp_srv_task,"watch_tcp_srv_task", 1024, NULL, 5, NULL);
 }
