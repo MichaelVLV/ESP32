@@ -35,7 +35,7 @@
 #include "time.h"
 #include "sys/time.h"
 
-#define WIFI_SSID "WIFI_RS485"
+#define WIFI_SSID "RS485"
 #define WIFI_PASS "12345678"
 #define WIFI_TAG   WIFI_SSID
 
@@ -55,6 +55,7 @@
 #define USART_CTS  (UART_PIN_NO_CHANGE)
 #define RS485_RE   (GPIO_NUM_17) // low:  active RO (to external RX)
 #define RS485_DE   (GPIO_NUM_16) // high: active DI (to external TX)
+#define UART_TAG   "RS485_UART"
 
 #define EXAMPLE_DEFAULT_PKTSIZE 1460
 
@@ -65,6 +66,7 @@ typedef struct FlowMeterData_s
     uint8_t  SPP_Buf[BUF_SIZE];
     uint8_t  TCP_Buf[BUF_SIZE];
     uint8_t  UART_Buf[BUF_SIZE];
+    uint32_t UART_RxCounter;
     uint32_t SPP_len;
     uint32_t TCP_len;
     uint32_t UART_len;
@@ -180,38 +182,14 @@ void RS485_pins_init(void)
 	gpio_set_level(RS485_DE, 0);
 }
 
-// sending buffers to UART
-void RS485_send_data(RS485_DataBuffer_t buffToSend)
+static void IRAM_ATTR uart_intr_handle()
 {
-	gpio_set_level(RS485_RE, 1);
-	gpio_set_level(RS485_DE, 1);
-
-	vTaskDelay(10 / portTICK_PERIOD_MS);
-
-	switch(buffToSend)
-	{
-	case E_SPP_BUFFER:
-		uart_write_bytes(RS485_UART, (char*)FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
-		break;
-
-	case E_TCP_BUFFER:
-		uart_write_bytes(RS485_UART, (char*)FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
-		break;
-
-	case E_UART_BUFFER:
-		uart_write_bytes(RS485_UART, (char*)FlowMeterData.UART_Buf, FlowMeterData.UART_len);
-		break;
-    default:
-        break;
-	}
-
-	vTaskDelay(10 / portTICK_PERIOD_MS);
-
-	gpio_set_level(RS485_RE, 0);
-	gpio_set_level(RS485_DE, 0);
+	ESP_LOGI(UART_TAG, "ISR!/n");
 }
 
-static void RS485_task()
+
+static QueueHandle_t rs485_queue;
+void RS485_uart_init(void)
 {
     RS485_pins_init();
 
@@ -224,49 +202,200 @@ static void RS485_task()
     };
     uart_param_config(RS485_UART, &uart_config);
     uart_set_pin(RS485_UART, USART_TXD, USART_RXD, USART_RTS, USART_CTS);
-    uart_driver_install(RS485_UART, BUF_SIZE, BUF_SIZE, 0, NULL, 0);
+    //uart_driver_install(RS485_UART, BUF_SIZE*2, BUF_SIZE, 0, NULL, 0);
+    uart_driver_install(RS485_UART, BUF_SIZE, BUF_SIZE, 1, &rs485_queue, 0);
+    uart_isr_register(RS485_UART, uart_intr_handle, NULL, ESP_INTR_FLAG_IRAM, NULL);
+    uart_enable_rx_intr(RS485_UART);
+}
 
-    // Configure a temporary buffer for the incoming data
-    //uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
+// sending buffers to UART
+void RS485_send_data(RS485_DataBuffer_t buffToSend)
+{
+	gpio_set_level(RS485_RE, 1);
+	gpio_set_level(RS485_DE, 1);
 
+	//vTaskDelay(20 / portTICK_PERIOD_MS); // baudrate 9600
+	//vTaskDelay(10 / portTICK_PERIOD_MS); // baudrate 115200
+
+	switch(buffToSend)
+	{
+		case E_SPP_BUFFER:
+			uart_write_bytes(RS485_UART, (char*)FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+			break;
+
+		case E_TCP_BUFFER:
+			uart_write_bytes(RS485_UART, (char*)FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
+			break;
+
+		case E_UART_BUFFER:
+			uart_write_bytes(RS485_UART, (char*)FlowMeterData.UART_Buf, FlowMeterData.UART_len);
+			break;
+
+		default:
+			break;
+	}
+
+	vTaskDelay(20 / portTICK_PERIOD_MS); // baudrate 9600
+	//vTaskDelay(10 / portTICK_PERIOD_MS); // baudrate 115200
+
+	gpio_set_level(RS485_RE, 0);
+	gpio_set_level(RS485_DE, 0);
+}
+
+
+static void RS485_tx_task(void *pvParameters)
+{
+static uint32_t lastRxCounter =0;
+	while(1)
+	{
+		if(FlowMeterData.UART_RxCounter > 0 )
+		{
+		  if(lastRxCounter != FlowMeterData.UART_RxCounter )
+		  {
+			  lastRxCounter = FlowMeterData.UART_RxCounter;
+		  }
+		  else
+		  {
+			ESP_LOGI(UART_TAG, "GOT FULL PACKET:, size: %d", lastRxCounter);
+			FlowMeterData.UART_len = FlowMeterData.UART_RxCounter;
+			FlowMeterData.UART_RxCounter =0; lastRxCounter = 0;
+
+			if(FlowMeterData.SPP_conn == true)	    // send data directly to SPP
+			{
+			   esp_spp_cb_param_t spp_param;
+			   spp_param.open.handle = gl_spp_handle;
+			   SPP_to_UART_write(&spp_param);
+		    }
+			else if (FlowMeterData.TCP_conn == true) // send UART data to TCP
+			{
+			   printf("FL_UART(len:%d):%s\n",FlowMeterData.UART_len, FlowMeterData.UART_Buf);
+			   send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
+			}
+		  }
+		}
+		//send data from SPP to UART
+		if(FlowMeterData.SPP_got_packet == true)
+		{
+			RS485_send_data(E_SPP_BUFFER);
+			FlowMeterData.SPP_got_packet = false;
+		}
+
+		//send data from TCP to UART
+		if(FlowMeterData.TCP_got_packet == true)
+		{
+			RS485_send_data(E_TCP_BUFFER);
+			FlowMeterData.TCP_got_packet = false;
+		}
+		vTaskDelay(50 / portTICK_RATE_MS);
+	}
+}
+
+static void RS485_rx_task(void *pvParameters)
+{
+	uart_event_t event;
+    int len = 0;
+    unsigned char rxLen =0;
+    static int rxInProcess =0;
     while (1)
     {
-        // Read data from the UART
-        //int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 20 / portTICK_RATE_MS);
-    	int len = uart_read_bytes(RS485_UART, FlowMeterData.UART_Buf, BUF_SIZE, 20 / portTICK_RATE_MS);
-
-    	if(len > 0)
+    	if(xQueueReceive(rs485_queue, (void * )&event, (portTickType)portMAX_DELAY))
+    	//if(xQueueReceive(rs485_queue, (void * )&event, (portTickType) 10 / portTICK_RATE_MS))
     	{
-    		FlowMeterData.UART_len = len;
-            FlowMeterData.UART_got_packet = true;
-
-            // send data directly to SPP
-            if(FlowMeterData.SPP_conn == true)
+    		//----
+            switch(event.type)
             {
-                esp_spp_cb_param_t spp_param;
-                spp_param.open.handle = gl_spp_handle;
-                SPP_to_UART_write(&spp_param);
+               case UART_DATA:
+            	   len = uart_read_bytes(RS485_UART, (uint8_t*)&FlowMeterData.UART_Buf[FlowMeterData.UART_RxCounter], event.size, (portTickType)portMAX_DELAY);
+            	   FlowMeterData.UART_RxCounter += len;
+                   break;
+                //Event of HW FIFO overflow detected
+                case UART_FIFO_OVF:
+                    ESP_LOGI(UART_TAG, "hw fifo overflow");
+                    uart_flush_input(RS485_UART);
+                    xQueueReset(rs485_queue);
+                    break;
+                //Event of UART ring buffer full
+                case UART_BUFFER_FULL:
+                    ESP_LOGI(UART_TAG, "ring buffer full");
+                    uart_flush_input(RS485_UART);
+                    xQueueReset(rs485_queue);
+                    break;
+                //Event of UART RX break detected
+                case UART_BREAK:
+                    ESP_LOGI(UART_TAG, "uart rx break");
+                    break;
+                //Event of UART parity check error
+                case UART_PARITY_ERR:
+                    ESP_LOGI(UART_TAG, "uart parity error");
+                    break;
+                //Event of UART frame error
+                case UART_FRAME_ERR:
+                    ESP_LOGI(UART_TAG, "uart frame error");
+                    break;
+                //UART_PATTERN_DET
+                case UART_PATTERN_DET:
+                	ESP_LOGI(UART_TAG, "pattern det, event type: %d", event.type);
+                    break;
+                //Others
+                default:
+                    ESP_LOGI(UART_TAG, "uart event type: %d", event.type);
+                    break;
             }
-            else if (FlowMeterData.TCP_conn == true)
-			{
-            	// send UART data to TCP
-            	//netconn_write(gl_tcp_conn, FlowMeterData.TCP_Buf, FlowMeterData.TCP_len, NETCONN_NOCOPY);
-            	send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
-			}
+    		//----
+//    		if(event.type == UART_DATA)
+//    		{
+//    			//ESP_LOGI(UART_TAG, "(UART_DATA), event type: %d, size: %d", event.type, event.size);
+//				// Read data from the UART
+//				//int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 20 / portTICK_RATE_MS);
+//				//len = uart_read_bytes(RS485_UART, FlowMeterData.UART_Buf, event.size, portMAX_DELAY);
+//
+//    			len = uart_read_bytes(RS485_UART, (uint8_t*)&FlowMeterData.UART_Buf[rxLen], event.size, (portTickType) 10 / portTICK_RATE_MS);
+//    			rxLen += len;
+//
+//    			if( (len > 0)&&(rxInProcess == 0))
+//				{
+//    				ESP_LOGI(UART_TAG, "GOT data:, size: %d", rxLen);
+//					rxInProcess = 0;
+//				}
+//    			else
+//    			{
+//    			  if(rxLen > 0)
+//    			  {
+//    				  ESP_LOGI(UART_TAG, "GOT FULL PACKET:, size: %d", rxLen);
+//    				  rxLen =0;
+//    			  }
+//    			}
+//
+//    		}
+//    		else
+//    		{
+//				if((rxLen > 0) && (rxInProcess))
+//		        {
+//					ESP_LOGI(UART_TAG, "len > 0 : %d", rxLen);
+//					FlowMeterData.UART_len = rxLen;
+//					FlowMeterData.UART_got_packet = true;
+//
+// 				    if(FlowMeterData.SPP_conn == true)	    // send data directly to SPP
+//     				{
+//	    				esp_spp_cb_param_t spp_param;
+//		    			spp_param.open.handle = gl_spp_handle;
+//				   	    SPP_to_UART_write(&spp_param);
+//			    	}
+//				    else if (FlowMeterData.TCP_conn == true) // send UART data to TCP
+//			    	{
+//				    	printf("FL_UART(len:%d):%s\n",FlowMeterData.UART_len, FlowMeterData.UART_Buf);
+//					    send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
+//				    }
+//					rxLen = 0;
+//					rxInProcess =0;
+//		         }
+//			  }
+//    		else
+//    		{
+//    			ESP_LOGI(UART_TAG, "uart event type: %d, size: %d", event.type, event.size);
+//    		}
     	}
-
-    	//send data from SPP to UART
-    	if(FlowMeterData.SPP_got_packet == true)
-    	{
-    		RS485_send_data(E_SPP_BUFFER);
-            FlowMeterData.SPP_got_packet = false;
-    	}
-
-    	if(FlowMeterData.TCP_got_packet == true)
-    	{
-    		RS485_send_data(E_TCP_BUFFER);
-    		FlowMeterData.TCP_got_packet = false;
-    	}
+    	//ESP_LOGI(UART_TAG, "out of xQueueReceive");
     }
 }
 
@@ -323,9 +452,9 @@ void wifi_init_softap()
         .ap = {
             .ssid = WIFI_SSID,
             .ssid_len = strlen(WIFI_SSID),
-            .password = WIFI_PASS,
+            //.password = WIFI_PASS,
             .max_connection = 2,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK
+            .authmode = WIFI_AUTH_OPEN//WIFI_AUTH_WPA_WPA2_PSK
         },
     };
     if (strlen(WIFI_PASS) == 0) {
@@ -619,8 +748,8 @@ static void tcp_server2_task(void *pvParameters)
     /*create tcp socket*/
     int socket_ret;
 
-    ESP_LOGI(TCP_TAG, "tcp_server will start after 3s!");
-    vTaskDelay(3000 / portTICK_RATE_MS);
+    ESP_LOGI(TCP_TAG, "tcp_server will start after 100ms!");
+    vTaskDelay(100 / portTICK_RATE_MS);
     ESP_LOGI(TCP_TAG, "creating tcp server...");
     socket_ret=create_tcp_server();
 
@@ -681,7 +810,6 @@ static void watch_tcp_srv_task(void *pvParameters)
 	  vTaskDelay(1000 / portTICK_RATE_MS);//every 1s
   }
 }
-
 
 void print_chip_inform(void)
 {
@@ -749,8 +877,12 @@ void app_main()
     wifi_init_softap();
 
     // RS485
-    xTaskCreate(RS485_task, "RS485_task", 4*1024, NULL, 10, NULL);
-    //xTaskCreate(&tcp_server_task,"tcp_server_task", 4096, NULL, 5, NULL);
-    xTaskCreate(&tcp_server2_task,"tcp_server2_task", 4096, NULL, 5, NULL);
-    xTaskCreate(&watch_tcp_srv_task,"watch_tcp_srv_task", 1024, NULL, 5, NULL);
+    RS485_uart_init();
+    xTaskCreate(RS485_rx_task, "RS485_rx_task", 8*1024, NULL, 1, NULL);
+    xTaskCreate(RS485_tx_task, "RS485_tx_task", 8*1024, NULL, 1, NULL);
+
+    //TCP
+    //xTaskCreate(&tcp_server_task,"tcp_server_task", 4096, NULL, 5, NULL); // DISCONNECTING
+    xTaskCreate(&tcp_server2_task, "tcp_server2_task", 4096, NULL, 5, NULL);
+    xTaskCreate(&watch_tcp_srv_task, "watch_tcp_srv_task", 1024, NULL, 5, NULL);
 }
