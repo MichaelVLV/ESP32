@@ -245,33 +245,34 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 
 static void RS485_tx_task(void *pvParameters)
 {
-static uint32_t lastRxCounter =0;
+    static uint32_t lastRxCounter = 0;
+
 	while(1)
 	{
 		if(FlowMeterData.UART_RxCounter > 0 )
 		{
-		  if(lastRxCounter != FlowMeterData.UART_RxCounter )
-		  {
-			  lastRxCounter = FlowMeterData.UART_RxCounter;
-		  }
-		  else
-		  {
-			ESP_LOGI(UART_TAG, "GOT FULL PACKET:, size: %d", lastRxCounter);
-			FlowMeterData.UART_len = FlowMeterData.UART_RxCounter;
-			FlowMeterData.UART_RxCounter =0; lastRxCounter = 0;
-
-			if(FlowMeterData.SPP_conn == true)	    // send data directly to SPP
+			if(lastRxCounter != FlowMeterData.UART_RxCounter )
 			{
-			   esp_spp_cb_param_t spp_param;
-			   spp_param.open.handle = gl_spp_handle;
-			   SPP_to_UART_write(&spp_param);
-		    }
-			else if (FlowMeterData.TCP_conn == true) // send UART data to TCP
-			{
-			   printf("FL_UART(len:%d):%s\n",FlowMeterData.UART_len, FlowMeterData.UART_Buf);
-			   send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
+			    lastRxCounter = FlowMeterData.UART_RxCounter;
 			}
-		  }
+			else
+			{
+				ESP_LOGI(UART_TAG, "GOT FULL PACKET:, size: %d", lastRxCounter);
+				FlowMeterData.UART_len = FlowMeterData.UART_RxCounter;
+				FlowMeterData.UART_RxCounter =0; lastRxCounter = 0;
+
+				if(FlowMeterData.SPP_conn == true)	    // send data directly to SPP
+				{
+					esp_spp_cb_param_t spp_param;
+					spp_param.open.handle = gl_spp_handle;
+					SPP_to_UART_write(&spp_param);
+				}
+				else if (FlowMeterData.TCP_conn == true) // send UART data to TCP
+				{
+					printf("FL_UART(len:%d):%s\n",FlowMeterData.UART_len, FlowMeterData.UART_Buf);
+					send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
+				}
+			}
 		}
 		//send data from SPP to UART
 		if(FlowMeterData.SPP_got_packet == true)
@@ -453,7 +454,7 @@ void wifi_init_softap()
             .ssid = WIFI_SSID,
             .ssid_len = strlen(WIFI_SSID),
             //.password = WIFI_PASS,
-            .max_connection = 2,
+            .max_connection = 1,
             .authmode = WIFI_AUTH_OPEN//WIFI_AUTH_WPA_WPA2_PSK
         },
     };
