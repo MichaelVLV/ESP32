@@ -121,7 +121,8 @@ void print_chip_inform(void)
     printf("%dMB %s flash\n", spi_flash_get_chip_size() / (1024 * 1024),
             (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
     uint8_t chipid[6];
-    esp_efuse_read_mac(&chipid);
+    //esp_efuse_mac_get_custom(&chipid);
+    esp_efuse_mac_get_default((uint8_t*)&chipid);
     printf("ID:%02X_%02X_%02X_%02X_%02X_%02X\n",chipid[0], chipid[1], chipid[2], chipid[3], chipid[4], chipid[5]);
 }
 
@@ -252,7 +253,7 @@ static void tcp_conn(void *pvParameters)  // TCP
 
     /*create a task to tx/rx data*/
 
-    xTaskCreate(&send_data, "send_data", 4096, NULL, 4, NULL);
+    //xTaskCreate(&send_data, "send_data", 4096, NULL, 4, NULL);
 
     TaskHandle_t tx_rx_task;
     xTaskCreate(&send_data, "send_data", 4096, NULL, 4, &tx_rx_task);
@@ -299,6 +300,8 @@ static void tcp_conn(void *pvParameters)  // TCP
 //	    ESP_LOGI(TCP_TAG, "tcp recv %d byte per sec!\n", bps);
 //#endif /*EXAMPLE_ESP_TCP_PERF_TX*/
 //    }
+
+    ESP_LOGI(TCP_TAG, "CONN. task deleting...");
     close_socket();
     vTaskDelete(tx_rx_task);
     vTaskDelete(NULL);

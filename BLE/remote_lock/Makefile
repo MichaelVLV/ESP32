@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := ble_lock
+PROJECT_NAME := remote_lock
 
 #COMPONENT_ADD_INCLUDEDIRS := components/include
 
