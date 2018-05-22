@@ -44,16 +44,22 @@
 
 #define BLE_TAG          "BLE"
 #define DEVICE_NAME      "BLE_LOCK"
-#define REMOTE_SERVICE_UUID        0x00FF
-#define REMOTE_NOTIFY_CHAR_UUID    0xFF01
+#define REMOTE_SERVICE_UUID         0x00FF
+#define REMOTE_NOTIFY_CHAR_UUID     0xFF01
+#define REMOTE_BATTERY_SERVICE_UUID 0x180F
 #define PROFILE_NUM      1
 #define PROFILE_A_APP_ID 0
 #define INVALID_HANDLE   0
+
+#define PROFILE_BATTERY_SERVICE 0 // 0x180F
+#define PROFILE_DEVICE_INFO     1 // 0x180A
+#define PROFILE_HRM             2 // 0x180D
+
 static const char remote_device_name[] = "Nordic_HRM";
-static bool connect_ble    = false;
-static bool get_server = false;
-static esp_gattc_char_elem_t *char_elem_result   = NULL;
-static esp_gattc_descr_elem_t *descr_elem_result = NULL;
+static bool connect_ble    = false;  // BLE
+static bool get_server = false;  // BLE
+static esp_gattc_char_elem_t *char_elem_result   = NULL;  // BLE
+static esp_gattc_descr_elem_t *descr_elem_result = NULL;  // BLE
 
 struct gattc_profile_inst { // BLE
     esp_gattc_cb_t gattc_cb;
@@ -82,15 +88,28 @@ static struct sockaddr_in server_addr; // TCP
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+static void gattc_profile_battery_service_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+
 
 static esp_bt_uuid_t remote_filter_service_uuid = {
     .len = ESP_UUID_LEN_16,
     .uuid = {.uuid16 = REMOTE_SERVICE_UUID,},
 };
 
+
+static esp_bt_uuid_t remote_filter_battery_service_uuid = {
+    .len = ESP_UUID_LEN_16,
+    .uuid = {.uuid16 = REMOTE_BATTERY_SERVICE_UUID,},
+};
+
 static esp_bt_uuid_t remote_filter_char_uuid = {
     .len = ESP_UUID_LEN_16,
     .uuid = {.uuid16 = REMOTE_NOTIFY_CHAR_UUID,},
+};
+
+static esp_bt_uuid_t remote_battery_filter_char_uuid = {
+    .len = ESP_UUID_LEN_16,
+    .uuid = {.uuid16 = ESP_GATT_UUID_BATTERY_LEVEL,},
 };
 
 static esp_bt_uuid_t notify_descr_uuid = {
@@ -109,11 +128,20 @@ static esp_ble_scan_params_t ble_scan_params = {
 
 /* One gatt-based profile one app_id and one gattc_if, this array will store the gattc_if returned by ESP_GATTS_REG_EVT */
 static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = { // BLE
-    [PROFILE_A_APP_ID] = {
-        .gattc_cb = gattc_profile_event_handler,
-        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+//    [PROFILE_DEVICE_INFO] = {
+//        .gattc_cb = gattc_profile_event_handler,
+//        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+//    },
+    [PROFILE_BATTERY_SERVICE] = {
+        .gattc_cb = gattc_profile_battery_service_event_handler,
+        .gattc_if = ESP_GATT_IF_NONE,
     },
+//    [PROFILE_HRM] = {
+//        .gattc_cb = gattc_profile_event_handler,
+//        .gattc_if = ESP_GATT_IF_NONE,
+//    },
 };
+
 
 static esp_err_t event_handler(void *ctx, system_event_t *event) //WIFI
 {
@@ -365,6 +393,292 @@ static void tcp_conn(void *pvParameters)  // TCP
     vTaskDelete(NULL);
 }
 
+static void gattc_profile_battery_service_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param) // BLE
+{
+    esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
+
+    switch (event) {
+    case ESP_GATTC_REG_EVT:
+        ESP_LOGI(BLE_TAG, "(battery)REG_EVT");
+        esp_err_t scan_ret = esp_ble_gap_set_scan_params(&ble_scan_params);
+        if (scan_ret){
+            ESP_LOGE(BLE_TAG, "(battery)set scan params error, error code = %x", scan_ret);
+        }
+        break;
+    case ESP_GATTC_CONNECT_EVT:{
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_CONNECT_EVT conn_id %d, if %d", p_data->connect.conn_id, gattc_if);
+        gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id = p_data->connect.conn_id;
+        memcpy(gl_profile_tab[PROFILE_BATTERY_SERVICE].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
+        ESP_LOGI(BLE_TAG, "(battery)REMOTE BDA:");
+        esp_log_buffer_hex(BLE_TAG, gl_profile_tab[PROFILE_BATTERY_SERVICE].remote_bda, sizeof(esp_bd_addr_t));
+        esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->connect.conn_id);
+        if (mtu_ret){
+            ESP_LOGE(BLE_TAG, "(battery)config MTU error, error code = %x", mtu_ret);
+        }
+        break;
+    }
+    case ESP_GATTC_OPEN_EVT:
+        if (param->open.status != ESP_GATT_OK){
+            ESP_LOGE(BLE_TAG, "(battery)open failed, status %d", p_data->open.status);
+            break;
+        }
+        ESP_LOGI(BLE_TAG, "(battery)open success");
+        break;
+    case ESP_GATTC_CFG_MTU_EVT:
+        if (param->cfg_mtu.status != ESP_GATT_OK){
+            ESP_LOGE(BLE_TAG,"(battery)config mtu failed, error status = %x", param->cfg_mtu.status);
+        }
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_CFG_MTU_EVT, Status %d, MTU %d, conn_id %d", param->cfg_mtu.status, param->cfg_mtu.mtu, param->cfg_mtu.conn_id);
+        esp_err_t ret_search_gatt;
+        ret_search_gatt = esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, &remote_filter_battery_service_uuid); // with filter
+        //ret_search_gatt = esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, NULL);
+        if(ret_search_gatt){
+            ESP_LOGI(BLE_TAG, "(battery)service not found, error code = %x", ret_search_gatt);
+        }else{
+        	ESP_LOGI(BLE_TAG, "(battery)service found");
+        }
+        break;
+    case ESP_GATTC_SEARCH_RES_EVT: {
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_SEARCH_RES_EVT");
+        esp_gatt_srvc_id_t *srvc_id =(esp_gatt_srvc_id_t *)&p_data->search_res.srvc_id;
+
+        //check service len
+        if (srvc_id->id.uuid.len == ESP_UUID_LEN_16) {
+            ESP_LOGI(BLE_TAG,  "UUID16: %x", srvc_id->id.uuid.uuid.uuid16);
+        } else if (srvc_id->id.uuid.len == ESP_UUID_LEN_32) {
+            ESP_LOGI(BLE_TAG,  "UUID32: %x", srvc_id->id.uuid.uuid.uuid32);
+        } else if (srvc_id->id.uuid.len == ESP_UUID_LEN_128) {
+            ESP_LOGI(BLE_TAG,  "UUID128: %x,%x,%x,%x,%x,%x,%x,%x,%x,%x,%x,%x,%x,%x,%x,%x", srvc_id->id.uuid.uuid.uuid128[0],
+                     srvc_id->id.uuid.uuid.uuid128[1], srvc_id->id.uuid.uuid.uuid128[2], srvc_id->id.uuid.uuid.uuid128[3],
+                     srvc_id->id.uuid.uuid.uuid128[4], srvc_id->id.uuid.uuid.uuid128[5], srvc_id->id.uuid.uuid.uuid128[6],
+                     srvc_id->id.uuid.uuid.uuid128[7], srvc_id->id.uuid.uuid.uuid128[8], srvc_id->id.uuid.uuid.uuid128[9],
+                     srvc_id->id.uuid.uuid.uuid128[10], srvc_id->id.uuid.uuid.uuid128[11], srvc_id->id.uuid.uuid.uuid128[12],
+                     srvc_id->id.uuid.uuid.uuid128[13], srvc_id->id.uuid.uuid.uuid128[14], srvc_id->id.uuid.uuid.uuid128[15]);
+        } else {
+            ESP_LOGE(BLE_TAG,  "UNKNOWN LEN %d", srvc_id->id.uuid.len);
+        }
+
+        ESP_LOGI(BLE_TAG, "(battery)srvc_id_len:%d [%x]", srvc_id->id.uuid.len, srvc_id->id.uuid.len);
+//        for (uint8_t i = 0; i < 15; i++)
+//        {
+//            ESP_LOGI(BLE_TAG, "(battery)srvc_id:%d [%x]", i, srvc_id->id.uuid.uuid.uuid128[i]);
+//        }
+
+        if (srvc_id->id.uuid.len == ESP_UUID_LEN_16 && srvc_id->id.uuid.uuid.uuid16 == REMOTE_BATTERY_SERVICE_UUID) {
+            ESP_LOGI(BLE_TAG, "(battery)service found");
+            get_server = true;
+            gl_profile_tab[PROFILE_BATTERY_SERVICE].service_start_handle = p_data->search_res.start_handle;
+            gl_profile_tab[PROFILE_BATTERY_SERVICE].service_end_handle = p_data->search_res.end_handle;
+            ESP_LOGI(BLE_TAG, "(battery)UUID16: %x", srvc_id->id.uuid.uuid.uuid16);
+        }
+        break;
+    }
+    case ESP_GATTC_SEARCH_CMPL_EVT:
+        if (p_data->search_cmpl.status != ESP_GATT_OK){
+            ESP_LOGE(BLE_TAG, "(battery)search service failed, error status = %x", p_data->search_cmpl.status);
+            break;
+        }
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_SEARCH_CMPL_EVT");
+        if (get_server){
+            ESP_LOGI(BLE_TAG, "(battery)get_server");
+            uint16_t count = 0;
+            esp_gatt_status_t status = esp_ble_gattc_get_attr_count( gattc_if,
+                                                                     p_data->search_cmpl.conn_id,
+                                                                     ESP_GATT_DB_CHARACTERISTIC,
+                                                                     gl_profile_tab[PROFILE_BATTERY_SERVICE].service_start_handle,
+                                                                     gl_profile_tab[PROFILE_BATTERY_SERVICE].service_end_handle,
+                                                                     INVALID_HANDLE,
+                                                                     &count);
+            if (status != ESP_GATT_OK){
+                ESP_LOGE(BLE_TAG, "(battery)esp_ble_gattc_get_attr_count error");
+            }
+
+            if (count > 0){
+                char_elem_result = (esp_gattc_char_elem_t *)malloc(sizeof(esp_gattc_char_elem_t) * count);
+                if (!char_elem_result){
+                    ESP_LOGE(BLE_TAG, "(battery)gattc no mem");
+                }else{
+                    status = esp_ble_gattc_get_char_by_uuid( gattc_if,
+                                                             p_data->search_cmpl.conn_id,
+                                                             gl_profile_tab[PROFILE_BATTERY_SERVICE].service_start_handle,
+                                                             gl_profile_tab[PROFILE_BATTERY_SERVICE].service_end_handle,
+															 remote_battery_filter_char_uuid, //remote_filter_char_uuid,
+                                                             char_elem_result,
+                                                             &count);
+                    if (status != ESP_GATT_OK){
+                        ESP_LOGE(BLE_TAG, "(battery)esp_ble_gattc_get_char_by_uuid error");
+                    }
+
+                    /*  Every service have only one char in our 'ESP_GATTS_DEMO' demo, so we used first 'char_elem_result' */
+                    if (count > 0 && (char_elem_result[0].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY)){
+                        gl_profile_tab[PROFILE_BATTERY_SERVICE].char_handle = char_elem_result[0].char_handle;
+                        esp_err_t errorcode = esp_ble_gattc_register_for_notify (gattc_if, gl_profile_tab[PROFILE_BATTERY_SERVICE].remote_bda, char_elem_result[0].char_handle);
+
+                        if(errorcode)
+                        {
+                        	ESP_LOGI(BLE_TAG, "(battery)esp_ble_gattc_register_for_notify error, code: %x", errorcode);
+                        }else{
+                            ESP_LOGI(BLE_TAG, "(battery)esp_ble_gattc_register_for_notify success");
+                        }
+                    }
+                }
+                /* free char_elem_result */
+                free(char_elem_result);
+            }else{
+                ESP_LOGE(BLE_TAG, "(battery)no char found");
+            }
+        }else{
+            ESP_LOGI(BLE_TAG, "(battery)GATT server not found");
+        }
+         break;
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_REG_FOR_NOTIFY_EVT");
+        if (p_data->reg_for_notify.status != ESP_GATT_OK){
+            ESP_LOGE(BLE_TAG, "(battery)REG FOR NOTIFY failed: error status = %d", p_data->reg_for_notify.status);
+        }else{
+            uint16_t count = 0;
+            uint16_t notify_en = 1;
+            esp_gatt_status_t ret_status = esp_ble_gattc_get_attr_count( gattc_if,
+                                                                         gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id,
+																		 ESP_GATT_DB_DESCRIPTOR,
+                                                                         gl_profile_tab[PROFILE_BATTERY_SERVICE].service_start_handle,
+                                                                         gl_profile_tab[PROFILE_BATTERY_SERVICE].service_end_handle,
+                                                                         gl_profile_tab[PROFILE_BATTERY_SERVICE].char_handle,
+                                                                         &count);
+            if (ret_status != ESP_GATT_OK){
+                ESP_LOGE(BLE_TAG, "(battery)esp_ble_gattc_get_attr_count error");
+            }
+            if (count > 0)
+            {
+                descr_elem_result = malloc(sizeof(esp_gattc_descr_elem_t) * count);
+                if (!descr_elem_result){
+                    ESP_LOGE(BLE_TAG, "(battery)malloc error, gattc no mem");
+                }else{
+                    ret_status = esp_ble_gattc_get_descr_by_char_handle( gattc_if,
+                                                                         gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id,
+                                                                         p_data->reg_for_notify.handle,
+                                                                         notify_descr_uuid,
+                                                                         descr_elem_result,
+                                                                         &count);
+                    if (ret_status != ESP_GATT_OK){
+                        ESP_LOGE(BLE_TAG, "(battery)esp_ble_gattc_get_descr_by_char_handle error");
+                    }
+
+                    /* Every char has only one descriptor in our 'ESP_GATTS_DEMO' demo, so we used first 'descr_elem_result' */
+                    if (count > 0 && descr_elem_result[0].uuid.len == ESP_UUID_LEN_16 && descr_elem_result[0].uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG){
+//                        ret_status = esp_ble_gattc_write_char_descr( gattc_if,
+//                                                                     gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id,
+//                                                                     descr_elem_result[0].handle,
+//                                                                     sizeof(notify_en),
+//                                                                     (uint8_t *)&notify_en,
+//                                                                     ESP_GATT_WRITE_TYPE_RSP,
+//                                                                     ESP_GATT_AUTH_REQ_NONE);
+                    	ret_status = esp_ble_gattc_read_char_descr( gattc_if,
+                    			 	 	 	 	 	 	 	 	 	gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id,
+																	descr_elem_result[0].handle,
+																	ESP_GATT_AUTH_REQ_NONE);
+                    }
+
+                    if (ret_status != ESP_GATT_OK){
+                        //ESP_LOGE(BLE_TAG, "(battery)esp_ble_gattc_write_char_descr error");
+                    	ESP_LOGE(BLE_TAG, "(battery)esp_ble_gattc_read_char_descr error, code: %x", ret_status);
+                    }
+
+                    /* free descr_elem_result */
+                    free(descr_elem_result);
+                }
+            }
+            else{
+                ESP_LOGE(BLE_TAG, "(battery)decsr not found");
+            }
+        }
+        break;
+    }
+    case ESP_GATTC_NOTIFY_EVT:
+        if (p_data->notify.is_notify){
+            ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_NOTIFY_EVT, receive notify value:");
+        }else{
+            ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_NOTIFY_EVT, receive indicate value:");
+        }
+        esp_log_buffer_hex(BLE_TAG, p_data->notify.value, p_data->notify.value_len);
+        break;
+    case ESP_GATTC_READ_CHAR_EVT:
+    	ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_READ_CHAR_EVT");
+        if (p_data->read.status != ESP_GATT_OK){
+            ESP_LOGE(BLE_TAG, "(battery)read char failed, error status = %x", p_data->read.status);
+            break;
+        }
+
+        const char *char_pointer = (char*)p_data->read.value; //p_data->read.value: p_data is pointer of union type esp_ble_gattc_cb_param_t
+                                                                    //for accesing the read struc we need to use p_data->read.value sintaxis.
+        int battery_percentage = (int)*char_pointer;
+        ESP_LOGI(BLE_TAG, "(p_data->read.value) Battery level: %d %%",battery_percentage);
+        ESP_LOGI(BLE_TAG, "p_data->read.value_len %d",p_data->read.value_len);
+        break;
+    case ESP_GATTC_READ_DESCR_EVT:
+    	ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_READ_DESCR_EVT");
+    	if (p_data->read.status != ESP_GATT_OK){
+    		 ESP_LOGE(BLE_TAG, "(battery)read descr failed, error status = %x", p_data->write.status);
+    		 break;
+    	}
+    	ESP_LOGI(BLE_TAG, "(battery)read descr success ");
+
+    	esp_gatt_status_t ret_status = esp_ble_gattc_read_char( gattc_if,
+    							gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id,
+								gl_profile_tab[PROFILE_BATTERY_SERVICE].char_handle,
+								ESP_GATT_AUTH_REQ_NONE);
+    	if(ret_status){
+    		ESP_LOGE(BLE_TAG, "(battery) esp_ble_gattc_read_char failed, error code = %x", ret_status);
+    	}else{
+    		ESP_LOGI(BLE_TAG, "(battery) esp_ble_gattc_read_char success ");
+    	}
+    	break;
+    case ESP_GATTC_WRITE_DESCR_EVT:
+    	ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_WRITE_DESCR_EVT");
+//        if (p_data->write.status != ESP_GATT_OK){
+//            ESP_LOGE(BLE_TAG, "(battery)write descr failed, error status = %x", p_data->write.status);
+//            break;
+//        }
+//        ESP_LOGI(BLE_TAG, "(battery)write descr success ");
+//        uint8_t write_char_data[35];
+//        for (int i = 0; i < sizeof(write_char_data); ++i)
+//        {
+//            write_char_data[i] = i % 256;
+//        }
+//        esp_ble_gattc_write_char( gattc_if,
+//                                  gl_profile_tab[PROFILE_BATTERY_SERVICE].conn_id,
+//                                  gl_profile_tab[PROFILE_BATTERY_SERVICE].char_handle,
+//                                  sizeof(write_char_data),
+//                                  write_char_data,
+//                                  ESP_GATT_WRITE_TYPE_RSP,
+//                                  ESP_GATT_AUTH_REQ_NONE);
+        break;
+
+    case ESP_GATTC_SRVC_CHG_EVT: {
+        esp_bd_addr_t bda;
+        memcpy(bda, p_data->srvc_chg.remote_bda, sizeof(esp_bd_addr_t));
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_SRVC_CHG_EVT, bd_addr:");
+        esp_log_buffer_hex(BLE_TAG, bda, sizeof(esp_bd_addr_t));
+        break;
+    }
+    case ESP_GATTC_WRITE_CHAR_EVT:
+        if (p_data->write.status != ESP_GATT_OK){
+            ESP_LOGE(BLE_TAG, "(battery)write char failed, error status = %x", p_data->write.status);
+            break;
+        }
+        ESP_LOGI(BLE_TAG, "(battery)write char success ");
+        break;
+    case ESP_GATTC_DISCONNECT_EVT:
+    	connect_ble = false;
+        get_server = false;
+        ESP_LOGI(BLE_TAG, "(battery)ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
+        break;
+    default:
+    	ESP_LOGI(BLE_TAG, "unregistered EVT:%d", event);
+        break;
+    }
+}
+
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param) // BLE
 {
     esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
@@ -607,7 +921,6 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
             break;
         }
         ESP_LOGI(BLE_TAG, "scan start success");
-
         break;
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         esp_ble_gap_cb_param_t *scan_result = (esp_ble_gap_cb_param_t *)param;
@@ -627,7 +940,9 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
                         connect_ble = true;
                         ESP_LOGI(BLE_TAG, "connect to the remote device.");
                         esp_ble_gap_stop_scanning();
-                        esp_ble_gattc_open(gl_profile_tab[PROFILE_A_APP_ID].gattc_if, scan_result->scan_rst.bda, true);
+                        //esp_ble_gattc_open(gl_profile_tab[PROFILE_DEVICE_INFO].gattc_if, scan_result->scan_rst.bda, true);
+                        esp_ble_gattc_open(gl_profile_tab[PROFILE_BATTERY_SERVICE].gattc_if, scan_result->scan_rst.bda, true);
+                        //esp_ble_gattc_open(gl_profile_tab[PROFILE_HRM].gattc_if, scan_result->scan_rst.bda, true);
                     }
                 }
             }
@@ -713,8 +1028,8 @@ void app_main()
 
 
     //WIFI
-    ESP_LOGI(WIFI_TAG, "ESP_WIFI_MODE_STA");
-    wifi_init_sta();
+    //ESP_LOGI(WIFI_TAG, "ESP_WIFI_MODE_STA");
+    //wifi_init_sta();
 
 
     // BLE
@@ -760,10 +1075,23 @@ void app_main()
             return;
         }
 
-        ret = esp_ble_gattc_app_register(PROFILE_A_APP_ID);
+//        ret = esp_ble_gattc_app_register(PROFILE_DEVICE_INFO);
+//        if (ret){
+//            ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
+//        }
+
+
+        ret = esp_ble_gattc_app_register(PROFILE_BATTERY_SERVICE);
         if (ret){
             ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
         }
+
+//        ret = esp_ble_gattc_app_register(PROFILE_HRM);
+//        if (ret){
+//            ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
+//        }
+
+
         esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
         if (local_mtu_ret){
             ESP_LOGE(BLE_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
