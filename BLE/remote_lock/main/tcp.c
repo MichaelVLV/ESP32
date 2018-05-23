@@ -1,13 +1,15 @@
 #include <string.h>
 #include <sys/socket.h>
-#include "tcp.h"
-#include "wifi.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "tcp.h"
+#include "wifi.h"
+#include "data.h"
 
-static int server_socket = 0; // TCP
-static int connect_socket = 0; // TCP
-static struct sockaddr_in server_addr; // TCP
+
+static int server_socket = 0;
+static int connect_socket = 0;
+static struct sockaddr_in server_addr;
 
 int get_socket_error_code(int socket)
 {
@@ -89,7 +91,8 @@ void send_data(void *pvParameters)
     while(1)
     {
     	tcp_packet_counter++;
-    	len = send(connect_socket, databuff, TCP_BUF_SIZE, 0);
+    	//len = send(connect_socket, databuff, TCP_BUF_SIZE, 0);
+    	len = send(connect_socket, LockData.BLE_buf, LockData.BLE_len, 0);
     	ESP_LOGI(TCP_TAG, "sended len: %d", len);
     	vTaskDelay(2000 / portTICK_RATE_MS);
 
@@ -143,10 +146,10 @@ void tcp_conn(void *pvParameters)
     	vTaskDelay(3000 / portTICK_RATE_MS);//every 3s
     	ESP_LOGI(TCP_TAG, "CONN.");
 
-    	if(tcp_packet_counter >15)
-    	{
-    		break;
-    	}
+//    	if(tcp_packet_counter >15) // debug
+//    	{
+//    	    break;
+//    	}
 
     }
 
