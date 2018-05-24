@@ -16,8 +16,8 @@ int get_socket_error_code(int socket)
     int result;
     u32_t optlen = sizeof(int);
     if(getsockopt(socket, SOL_SOCKET, SO_ERROR, &result, &optlen) == -1) {
-	ESP_LOGE(TCP_TAG, "getsockopt failed");
-	return -1;
+	    ESP_LOGE(TCP_TAG, "getsockopt failed");
+	    return -1;
     }
     return result;
 }
@@ -78,22 +78,35 @@ int check_working_socket()
 }
 
 uint8_t tcp_packet_counter = 0; //TCP (test)
-
 //send data
 void send_data(void *pvParameters)
 {
     int len = 0;
-    char databuff[TCP_BUF_SIZE];
-    memset(databuff, 'D', TCP_BUF_SIZE);
+//    char databuff[TCP_BUF_SIZE];
+//    memset(databuff, 'D', TCP_BUF_SIZE);
     vTaskDelay(100 / portTICK_RATE_MS);
     ESP_LOGI(TCP_TAG, "start sending...");
 
     while(1)
     {
-    	tcp_packet_counter++;
     	//len = send(connect_socket, databuff, TCP_BUF_SIZE, 0);
-    	len = send(connect_socket, LockData.BLE_buf, LockData.BLE_len, 0);
-    	ESP_LOGI(TCP_TAG, "sended len: %d", len);
+    	if(LockData.BLE_got_packet == true)
+    	{
+            len = send(connect_socket, LockData.BLE_buf, LockData.BLE_len, 0);
+            LockData.BLE_got_packet = false;
+        	ESP_LOGI(TCP_TAG, "sent BLE_buf, len: %d", len);
+        	tcp_packet_counter++;
+    	}
+
+    	if(LockData.UART_got_packet == true)
+    	{
+            len = send(connect_socket, LockData.UART_buf, LockData.UART_len, 0);
+            LockData.UART_got_packet = false;
+        	ESP_LOGI(TCP_TAG, "sent UART_buf, len: %d", len);
+        	tcp_packet_counter++;
+    	}
+
+    	ESP_LOGI(TCP_TAG, "total TCP packets sent: %d", tcp_packet_counter);
     	vTaskDelay(2000 / portTICK_RATE_MS);
 
 //    	if (tcp_packet_counter > 15)

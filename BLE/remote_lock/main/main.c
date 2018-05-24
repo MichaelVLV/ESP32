@@ -21,7 +21,6 @@
 #include "esp_gattc_api.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatt_common_api.h"
-//#include "driver/uart.h"
 //#include "driver/gpio.h"
 //-------------------
 #include "wifi.h"
@@ -109,6 +108,11 @@ void app_main()
     }
 
     //TCP
-    xTaskCreate(&tcp_conn, "tcp_conn", 4096, NULL, 5, NULL);
+    xTaskCreate(&tcp_conn, "tcp_conn", 4*1024, NULL, 5, NULL);
+
+    //UART
+    custom_uart_init();
+    xTaskCreate(uart_rx_task, "uart_rx_task", 2*1024, NULL, 1, NULL);
+    xTaskCreate(uart_tx_task, "uart_tx_task", 2*1024, NULL, 1, NULL);
 }
 
