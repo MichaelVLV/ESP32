@@ -26,7 +26,7 @@ void uart_tx_task(void *pvParameters)
 	while(1)
 	{
 		ESP_LOGI(UART_TAG, "uart_tx_task");
-		vTaskDelay(1000 / portTICK_RATE_MS);
+		vTaskDelay(2000 / portTICK_RATE_MS);
 	}
 }
 
@@ -80,7 +80,7 @@ void uart_rx_task(void *pvParameters)
                     break;
                 //Others
                 default:
-                    ESP_LOGI(UART_TAG, "uart event type: %d", event.type);
+                    ESP_LOGI(UART_TAG, "unknown uart event type: %d", event.type);
                     break;
             }
     	}

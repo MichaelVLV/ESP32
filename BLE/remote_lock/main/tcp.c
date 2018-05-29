@@ -77,6 +77,17 @@ int check_working_socket()
     return 0;
 }
 
+void hex_to_ascii( char hex, char* char2)
+{
+    if((hex>>4)<=9){char2[0] = (hex>>4) + '0';}
+    else{char2[0] = (hex>>4) + '7';}
+
+    if((hex & 0x0f)<=9){char2[1] = (hex & 0x0f) + '0';}
+    else{char2[1] = (hex & 0x0f) + '7';}
+}
+
+char hex_buff[50] = {0};
+
 uint8_t tcp_packet_counter = 0; //TCP (test)
 //send data
 void send_data(void *pvParameters)
@@ -92,7 +103,14 @@ void send_data(void *pvParameters)
     	//len = send(connect_socket, databuff, TCP_BUF_SIZE, 0);
     	if(LockData.BLE_got_packet == true)
     	{
-            len = send(connect_socket, LockData.BLE_buf, LockData.BLE_len, 0);
+    		send(connect_socket, "Card ID received:", sizeof("Card ID received:"), 0);
+    		hex_to_ascii((char)LockData.BLE_buf[0],  (char*)&hex_buff[0]);
+    		hex_to_ascii((char)LockData.BLE_buf[1],  (char*)&hex_buff[2]);
+    		hex_to_ascii((char)LockData.BLE_buf[2],  (char*)&hex_buff[4]);
+    		hex_to_ascii((char)LockData.BLE_buf[3],  (char*)&hex_buff[6]);
+
+            //len = send(connect_socket, LockData.BLE_buf, LockData.BLE_len, 0);
+    		send(connect_socket, hex_buff, 8, 0);
             LockData.BLE_got_packet = false;
         	ESP_LOGI(TCP_TAG, "sent BLE_buf, len: %d", len);
         	tcp_packet_counter++;

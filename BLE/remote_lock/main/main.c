@@ -91,12 +91,17 @@ void app_main()
             return;
         }
 
-        ret = esp_ble_gattc_app_register(PROFILE_A_APP_ID);
-        if (ret){
-            ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
-        }
+//        ret = esp_ble_gattc_app_register(PROFILE_A_APP_ID);
+//        if (ret){
+//            ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
+//        }
+//
+//        ret = esp_ble_gattc_app_register(PROFILE_B_APP_ID);
+//        if (ret){
+//            ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
+//        }
 
-        ret = esp_ble_gattc_app_register(PROFILE_B_APP_ID);
+        ret = esp_ble_gattc_app_register(PROFILE_C_APP_ID);
         if (ret){
             ESP_LOGE(BLE_TAG, "%s gattc app register failed, error code = %x\n", __func__, ret);
         }
@@ -112,7 +117,7 @@ void app_main()
 
     //UART
     custom_uart_init();
-    xTaskCreate(uart_rx_task, "uart_rx_task", 2*1024, NULL, 1, NULL);
+    //xTaskCreate(uart_rx_task, "uart_rx_task", 2*1024, NULL, 1, NULL);
     xTaskCreate(uart_tx_task, "uart_tx_task", 2*1024, NULL, 1, NULL);
 }
 
