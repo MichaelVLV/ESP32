@@ -77,7 +77,7 @@ int check_working_socket()
     return 0;
 }
 
-void hex_to_ascii( char hex, char* char2)
+void hex_to_ascii( char hex, char* char2)  // hex_to_ascii((char)LockData.BLE_buf[0],  (char*)&hex_buff[0]);
 {
     if((hex>>4)<=9){char2[0] = (hex>>4) + '0';}
     else{char2[0] = (hex>>4) + '7';}

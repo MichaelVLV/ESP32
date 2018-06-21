@@ -786,6 +786,10 @@ static void tcp_server2_task(void *pvParameters)
 			{
 				ESP_LOGW(TCP_TAG, "tcp disconnected... stop.\n");
 				printf("Code:%d\n", err_ret);
+				if(err_ret == ENOTCONN)
+				{
+				    ESP_LOGW(TCP_TAG, "(Socket is not connected)\n");
+				}
 				break;
 			}
 		}
@@ -806,8 +810,8 @@ static void watch_tcp_srv_task(void *pvParameters)
 	  {
 		  printf("TCP task is RESTARTING\n\n");
 	      xTaskCreate(&tcp_server2_task,"tcp_server2_task", 4096, NULL, 5, NULL);
+	      printf("tcp_server2_task created\n");
 	  }
-
 	  vTaskDelay(1000 / portTICK_RATE_MS);//every 1s
   }
 }
