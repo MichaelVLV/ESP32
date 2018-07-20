@@ -354,42 +354,35 @@ static void RS485_rx_task(void *pvParameters)
 				break;
 				//Event of HW FIFO overflow detected
 			case UART_FIFO_OVF:
-				ESP_LOGI(UART_TAG, "hw fifo overflow")
-				;
+				ESP_LOGI(UART_TAG, "hw fifo overflow");
 				uart_flush_input(RS485_UART);
 				xQueueReset(rs485_queue);
 				break;
 				//Event of UART ring buffer full
 			case UART_BUFFER_FULL:
-				ESP_LOGI(UART_TAG, "ring buffer full")
-				;
+				ESP_LOGI(UART_TAG, "ring buffer full");
 				uart_flush_input(RS485_UART);
 				xQueueReset(rs485_queue);
 				break;
 				//Event of UART RX break detected
 			case UART_BREAK:
-				ESP_LOGI(UART_TAG, "uart rx break")
-				;
+				ESP_LOGI(UART_TAG, "uart rx break");
 				break;
 				//Event of UART parity check error
 			case UART_PARITY_ERR:
-				ESP_LOGI(UART_TAG, "uart parity error")
-				;
+				ESP_LOGI(UART_TAG, "uart parity error");
 				break;
 				//Event of UART frame error
 			case UART_FRAME_ERR:
-				ESP_LOGI(UART_TAG, "uart frame error")
-				;
+				ESP_LOGI(UART_TAG, "uart frame error");
 				break;
 				//UART_PATTERN_DET
 			case UART_PATTERN_DET:
-				ESP_LOGI(UART_TAG, "pattern det, event type: %d", event.type)
-				;
+				ESP_LOGI(UART_TAG, "pattern det, event type: %d", event.type);
 				break;
 				//Others
 			default:
-				ESP_LOGI(UART_TAG, "uart event type: %d", event.type)
-				;
+				ESP_LOGI(UART_TAG, "uart event type: %d", event.type);
 				break;
 			}
 			//----
