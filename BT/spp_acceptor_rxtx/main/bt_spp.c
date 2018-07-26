@@ -41,10 +41,10 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 	case ESP_SPP_CLOSE_EVT:
 		ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT"); // when client disconnects
 		FlowMeterData.SPP_conn = false;
-		if(!is_wifi_running() )
-		{
-			wifi_ap_start();
-		}
+//		if(!is_wifi_running() )
+//		{
+//			wifi_ap_start();
+//		}
 		break;
 	case ESP_SPP_START_EVT:
 		ESP_LOGI(SPP_TAG, "ESP_SPP_START_EVT");
@@ -81,7 +81,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 		ESP_LOGI(SPP_TAG, "ESP_SPP_WRITE_EVT");
 		break;
 	case ESP_SPP_SRV_OPEN_EVT:
-		wifi_ap_stop();
+//		wifi_ap_stop();
 		ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT"); // client connected
 		gl_spp_handle = param->open.handle;
 		ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT spp_handle %d", gl_spp_handle);
@@ -169,10 +169,7 @@ void bt_start(void)
 		ESP_LOGE(SPP_TAG, "%s spp init failed\n", __func__);
 		return;
 	}
-//	if (esp_bluedroid_enable() != ESP_OK) {
-//		ESP_LOGE(SPP_TAG, "%s enable bluedroid failed\n", __func__);
-//		return;
-//	}
+
 	set_bt_status_running();
 	ESP_LOGI(SPP_TAG, "bluetooth STARTED");
 }

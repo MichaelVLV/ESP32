@@ -31,17 +31,17 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 		ESP_LOGI(WIFI_TAG, "station:"MACSTR" join, AID=%d",
 				MAC2STR(event->event_info.sta_connected.mac),
 				event->event_info.sta_connected.aid);
-		bt_stop();
+//		bt_stop();
 
 		break;
 	case SYSTEM_EVENT_AP_STADISCONNECTED:
 		ESP_LOGI(WIFI_TAG, "station:"MACSTR" leave, AID=%d",
 				MAC2STR(event->event_info.sta_disconnected.mac),
 				event->event_info.sta_disconnected.aid);
-        if(!is_bt_running() )
-        {
-        	bt_start();
-        }
+//        if(!is_bt_running() )
+//        {
+//        	bt_start();
+//        }
 		break;
 	case SYSTEM_EVENT_STA_DISCONNECTED:
 		esp_wifi_connect();

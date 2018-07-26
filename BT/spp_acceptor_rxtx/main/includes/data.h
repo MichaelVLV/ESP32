@@ -6,6 +6,12 @@
 
 #define BUF_SIZE  512
 
+typedef struct FM_Connections_s
+{
+	bool wifi_exchange; // TRUE: data exchanging over wifi
+	bool bt_exchange;   // TRUE: data exchanging over bluetooth
+}FM_Connections_t;
+
 typedef struct FlowMeterData_s
 {
 	uint8_t SPP_Buf[BUF_SIZE];
@@ -19,11 +25,12 @@ typedef struct FlowMeterData_s
 	uint8_t SPP_got_packet;
 	uint8_t TCP_got_packet;
 	uint8_t UART_got_packet;
-	bool SPP_conn; // TRUE: spp connected
-	bool TCP_conn; // TRUE: tcp connected
+	bool SPP_conn;     // TRUE: spp connected
+	bool TCP_conn;     // TRUE: tcp connected
 	bool wifi_running; // TRUE: wifi running
 	bool bt_running;   // TRUE: bt running
 	uint8_t adapter_ID[6];
+	FM_Connections_t FM_connections;
 } FlowMeterData_t;
 
 typedef enum RS485_DataBuffer_e
