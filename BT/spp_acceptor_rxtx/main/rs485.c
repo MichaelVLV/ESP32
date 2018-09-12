@@ -3,6 +3,7 @@
 #include "includes/rs485.h"
 #include "includes/data.h"
 #include "includes/tcp.h"
+#include "includes/wifi.h"
 //----------------------
 #include "driver/gpio.h"
 #include "driver/uart.h"
@@ -59,13 +60,13 @@ void RS485_tx_task(void *pvParameters)
 		 FlowMeterData.UART_len = counterRxData; counterRxData = 0;// FlowMeterData.UART_RxCounter;
 		 FlowMeterData.UART_RxCounter =0; //lastRxCounter = 0;
 
-		if(FlowMeterData.SPP_conn == true)	    // send data directly to SPP
+		if(FlowMeterData.SPP_conn && is_bt_exchanging() )	    // send data directly to SPP
 		{
 			esp_spp_cb_param_t spp_param;
 			spp_param.open.handle = gl_spp_handle;
 			SPP_to_UART_write(&spp_param);
 		}
-		else if (FlowMeterData.TCP_conn == true) // send UART data to TCP
+		else if (FlowMeterData.TCP_conn && is_wifi_exchaning() ) // send UART data to TCP
 		{
 			//printf("FL_UART(len:%d):%s\n",FlowMeterData.UART_len, FlowMeterData.UART_Buf);
 			send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
@@ -74,14 +75,14 @@ void RS485_tx_task(void *pvParameters)
 	  }
 
 		//send data from SPP to UART
-		if(FlowMeterData.SPP_got_packet == true)
+		if(FlowMeterData.SPP_got_packet && is_bt_exchanging() )
 		{
 		    RS485_send_data(E_SPP_BUFFER);
 			FlowMeterData.SPP_got_packet = false;
 		}
 
 		//send data from TCP to UART
-		if(FlowMeterData.TCP_got_packet == true)
+		if(FlowMeterData.TCP_got_packet && is_wifi_exchaning() )
 		{
 			RS485_send_data(E_TCP_BUFFER);
 			FlowMeterData.TCP_got_packet = false;

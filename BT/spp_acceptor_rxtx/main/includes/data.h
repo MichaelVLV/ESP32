@@ -27,8 +27,8 @@ typedef struct FlowMeterData_s
 	uint8_t UART_got_packet;
 	bool SPP_conn;     // TRUE: spp connected
 	bool TCP_conn;     // TRUE: tcp connected
-	bool wifi_running; // TRUE: wifi running
-	bool bt_running;   // TRUE: bt running
+	//bool wifi_running; // TRUE: wifi running
+	//bool bt_running;   // TRUE: bt running
 	uint8_t adapter_ID[6];
 	FM_Connections_t FM_connections;
 } FlowMeterData_t;

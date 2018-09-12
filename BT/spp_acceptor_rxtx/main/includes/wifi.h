@@ -12,7 +12,10 @@
 void wifi_init_softap(void);
 void wifi_ap_stop(void);
 void wifi_ap_start(void);
-bool is_wifi_running(void);
+bool is_wifi_exchaning(void);
+void set_wifi_exchange_running(void);
+void set_wifi_exchange_stopped(void);
+
 
 // EXTERNS
 extern EventGroupHandle_t wifi_event_group;

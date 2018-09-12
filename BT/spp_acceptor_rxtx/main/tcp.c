@@ -102,6 +102,9 @@ esp_err_t create_tcp_server()
 	FlowMeterData.TCP_conn = true;
 	ESP_LOGI(TCP_TAG, "tcp connection established!");
 	ESP_LOGI(TCP_TAG, "socket:%d", server_socket);
+
+	set_wifi_exchange_running();
+
 	return ESP_OK;
 }
 
@@ -122,8 +125,8 @@ void tcp_server_task(void *pvParameters)
 	/*create tcp socket*/
 	int socket_ret;
 
-	ESP_LOGI(TCP_TAG, "tcp_server will start after 100ms!");
-	vTaskDelay(100 / portTICK_RATE_MS);
+	ESP_LOGI(TCP_TAG, "tcp_server will start after 50ms!");
+	vTaskDelay(50 / portTICK_RATE_MS);
 	ESP_LOGI(TCP_TAG, "creating tcp server...");
 	socket_ret = create_tcp_server();
 
@@ -172,6 +175,7 @@ void tcp_server_task(void *pvParameters)
 	close_socket();
 	printf("socket closed\n");
 	FlowMeterData.TCP_conn = false;
+	set_wifi_exchange_stopped();
 	tcp_server_task_restart = true;
 	//vTaskDelete(tx_rx_task);
 	vTaskDelete(NULL);
@@ -182,11 +186,13 @@ void watch_tcp_srv_task(void *pvParameters)
 {
 	while (1)
 	{
+		infoLED_run();
+
 		if (tcp_server_task_restart == true)
 		{
 			printf("TCP task is RESTARTING\n\n");
 			xTaskCreate(&tcp_server_task, "tcp_server_task", 4096, NULL, 5, NULL);
-			printf("tcp_server2_task created\n");
+			printf("tcp_server_task created\n");
 		}
 		vTaskDelay(1000 / portTICK_RATE_MS); //every 1s
 	}

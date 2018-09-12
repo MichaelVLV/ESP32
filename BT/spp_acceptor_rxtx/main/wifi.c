@@ -89,7 +89,7 @@ void wifi_init_softap(void)
 	ESP_ERROR_CHECK(esp_wifi_start());
 
 	ESP_LOGI(WIFI_TAG, "wifi_init_softap finished.SSID:%s password:%s", bufInfo, WIFI_PASS);
-	FlowMeterData.wifi_running = true;
+	FlowMeterData.FM_connections.wifi_exchange = true;
 }
 
 void wifi_ap_stop(void)
@@ -98,7 +98,7 @@ void wifi_ap_stop(void)
     ESP_ERROR_CHECK(esp_wifi_stop() );
     //ESP_ERROR_CHECK(esp_wifi_deinit() );
     ESP_LOGI(WIFI_TAG, "wifi STOPPED");
-    FlowMeterData.wifi_running = false;
+    FlowMeterData.FM_connections.wifi_exchange = false;
 }
 
 void wifi_ap_start(void)
@@ -106,10 +106,22 @@ void wifi_ap_start(void)
     ESP_LOGI(WIFI_TAG, "wifi starting...");
     ESP_ERROR_CHECK(esp_wifi_start() );
     ESP_LOGI(WIFI_TAG, "wifi STARTED");
-    FlowMeterData.wifi_running = true;
+    FlowMeterData.FM_connections.wifi_exchange = true;
 }
 
-bool is_wifi_running(void)
+bool is_wifi_exchaning(void)
 {
-	return FlowMeterData.wifi_running;
+	return FlowMeterData.FM_connections.wifi_exchange;
+}
+
+void set_wifi_exchange_running(void)
+{
+	printf(">>>wifi_exchange_running\n");
+	FlowMeterData.FM_connections.wifi_exchange = true;
+}
+
+void set_wifi_exchange_stopped(void)
+{
+	printf(">>>wifi_exchange_stopped\n");
+	FlowMeterData.FM_connections.wifi_exchange = false;
 }

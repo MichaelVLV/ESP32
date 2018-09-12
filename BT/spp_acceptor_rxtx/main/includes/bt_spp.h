@@ -11,8 +11,9 @@
 void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param);
 void SPP_to_UART_write(esp_spp_cb_param_t *param);
 bool is_bt_running(void);
-void set_bt_status_running(void);
-void set_bt_status_stopped(void);
+bool is_bt_exchanging(void);
+void set_bt_exchange_running(void);
+void set_bt_exchange_stopped(void);
 void bt_stop(void);
 void bt_start(void);
 

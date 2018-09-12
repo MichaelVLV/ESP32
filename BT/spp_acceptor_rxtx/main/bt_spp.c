@@ -25,10 +25,14 @@ void SPP_to_UART_write(esp_spp_cb_param_t *param)
 
 void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
+	char bt_name[30];
+    sprintf(bt_name, "BT_RS485_%02X%02X%02X%02X%02X%02X",FlowMeterData.adapter_ID[0], FlowMeterData.adapter_ID[1], FlowMeterData.adapter_ID[2],
+    			                                         FlowMeterData.adapter_ID[3], FlowMeterData.adapter_ID[4], FlowMeterData.adapter_ID[5]);
 	switch (event) {
 	case ESP_SPP_INIT_EVT:
 		ESP_LOGI(SPP_TAG, "ESP_SPP_INIT_EVT");
 		esp_bt_dev_set_device_name(DEVICE_NAME);
+		//esp_bt_dev_set_device_name(bt_name);
 		esp_bt_gap_set_scan_mode(ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE);
 		esp_spp_start_srv(sec_mask, role_slave, 0, SPP_SERVER_NAME);
 		break;
@@ -41,10 +45,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 	case ESP_SPP_CLOSE_EVT:
 		ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT"); // when client disconnects
 		FlowMeterData.SPP_conn = false;
-//		if(!is_wifi_running() )
-//		{
-//			wifi_ap_start();
-//		}
+		set_bt_exchange_stopped();
 		break;
 	case ESP_SPP_START_EVT:
 		ESP_LOGI(SPP_TAG, "ESP_SPP_START_EVT");
@@ -86,6 +87,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 		gl_spp_handle = param->open.handle;
 		ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT spp_handle %d", gl_spp_handle);
 		FlowMeterData.SPP_conn = true;
+		set_bt_exchange_running();
 		break;
 	default:
 		break;
@@ -116,24 +118,26 @@ void bt_stop(void)
 		return;
 	}
 
-	set_bt_status_stopped();
+	set_bt_exchange_stopped();
 	ESP_LOGI(SPP_TAG, "bluetooth STOPPED");
 }
 
 bool is_bt_running(void)
 {
-	return FlowMeterData.bt_running;
+	return FlowMeterData.FM_connections.bt_exchange;
 }
 
 
-void set_bt_status_running(void)
+void set_bt_exchange_running(void)
 {
-	FlowMeterData.bt_running = true;
+	printf(">>>bt_exchange_running\n");
+	FlowMeterData.FM_connections.bt_exchange = true;
 }
 
-void set_bt_status_stopped(void)
+void set_bt_exchange_stopped(void)
 {
-	FlowMeterData.bt_running = false;
+	printf(">>>bt_exchange_stopped\n");
+	FlowMeterData.FM_connections.bt_exchange = false;
 }
 
 void bt_start(void)
@@ -170,9 +174,12 @@ void bt_start(void)
 		return;
 	}
 
-	set_bt_status_running();
+	set_bt_exchange_running();
 	ESP_LOGI(SPP_TAG, "bluetooth STARTED");
 }
 
-
+bool is_bt_exchanging(void)
+{
+	return FlowMeterData.FM_connections.bt_exchange;
+}
 
