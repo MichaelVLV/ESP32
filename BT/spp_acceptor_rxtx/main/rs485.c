@@ -77,6 +77,13 @@ void RS485_tx_task(void *pvParameters)
 		//send data from SPP to UART
 		if(FlowMeterData.SPP_got_packet && is_bt_exchanging() )
 		{
+		    vTaskDelay(5 / portTICK_RATE_MS);
+		    uart_flush_input(RS485_UART);
+		    {
+		        FlowMeterData.UART_RxCounter = 0;
+		        counterRxData = 0;
+				readLenRxData = 0;
+			}
 		    RS485_send_data(E_SPP_BUFFER);
 			FlowMeterData.SPP_got_packet = false;
 		}
@@ -84,6 +91,13 @@ void RS485_tx_task(void *pvParameters)
 		//send data from TCP to UART
 		if(FlowMeterData.TCP_got_packet && is_wifi_exchaning() )
 		{
+			vTaskDelay(5 / portTICK_RATE_MS);
+			uart_flush_input(RS485_UART);
+			{
+				FlowMeterData.UART_RxCounter = 0;
+				counterRxData = 0;
+				readLenRxData = 0;
+			}
 			RS485_send_data(E_TCP_BUFFER);
 			FlowMeterData.TCP_got_packet = false;
 		}
