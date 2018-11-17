@@ -3,7 +3,7 @@
 #include "esp_spi_flash.h"
 
 //---------------------------
-#define FW_VERSION   "1.0.1"
+#define FW_VERSION   "1.0.2"
 //---------------------------
 
 
