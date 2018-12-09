@@ -54,36 +54,66 @@ void RS485_tx_task(void *pvParameters)
 
 	while (1)
 	{
-	  if( FlowMeterData.RS485_got_packet)
-      {
-		 //ESP_LOGI(UART_TAG, "GOT FULL PACKET:, size: %d", lastRxCounter);
-		 FlowMeterData.UART_len = counterRxData; counterRxData = 0;// FlowMeterData.UART_RxCounter;
-		 FlowMeterData.UART_RxCounter =0; //lastRxCounter = 0;
+		if( FlowMeterData.RS485_got_packet)
+		{
+			 //ESP_LOGI(UART_TAG, "GOT FULL PACKET:, size: %d", lastRxCounter);
+			 FlowMeterData.UART_len = counterRxData;
+			 counterRxData = 0;// FlowMeterData.UART_RxCounter;
+			 FlowMeterData.UART_RxCounter =0; //lastRxCounter = 0;
 
-		if(FlowMeterData.SPP_conn && is_bt_exchanging() )	    // send data directly to SPP
-		{
-			esp_spp_cb_param_t spp_param;
-			spp_param.open.handle = gl_spp_handle;
-			SPP_to_UART_write(&spp_param);
+			if(FlowMeterData.SPP_conn && is_bt_exchanging() )	    // send data directly to SPP
+			{
+				esp_spp_cb_param_t spp_param;
+				spp_param.open.handle = gl_spp_handle;
+				printf("RS485_TO_BT(len:%d):\n",FlowMeterData.UART_len);
+				esp_log_buffer_hex("", FlowMeterData.UART_Buf, FlowMeterData.UART_len);
+
+				if(FlowMeterData.UART_Buf[0] == 0x24)
+				{
+					FlowMeterData.UART_len = FlowMeterData.UART_Buf[1];
+					SPP_to_UART_write(&spp_param);
+				}
+				else
+				{
+					printf("BT: FlowMeterData.UART_Buf[0] = 0x%.2X", FlowMeterData.UART_Buf[0]);
+				}
+
+			}
+			else if (FlowMeterData.TCP_conn && is_wifi_exchaning() ) // send UART data to TCP
+			{
+				printf("RS485_TO_TCP(len:%d):\n",FlowMeterData.UART_len);
+				esp_log_buffer_hex("", FlowMeterData.UART_Buf, FlowMeterData.UART_len);
+
+				if(FlowMeterData.UART_Buf[0] == 0x24)
+				{
+					FlowMeterData.UART_len = FlowMeterData.UART_Buf[1];
+					send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
+				}
+				else
+				{
+					printf("TCP: FlowMeterData.UART_Buf[0] = 0x%.2X", FlowMeterData.UART_Buf[0]);
+				}
+
+			}
+			FlowMeterData.RS485_got_packet = 0;
 		}
-		else if (FlowMeterData.TCP_conn && is_wifi_exchaning() ) // send UART data to TCP
-		{
-			//printf("FL_UART(len:%d):%s\n",FlowMeterData.UART_len, FlowMeterData.UART_Buf);
-			send(connect_socket, FlowMeterData.UART_Buf, FlowMeterData.UART_len, 0);
-		}
-		FlowMeterData.RS485_got_packet = 0;
-	  }
 
 		//send data from SPP to UART
 		if(FlowMeterData.SPP_got_packet && is_bt_exchanging() )
 		{
-		    vTaskDelay(5 / portTICK_RATE_MS);
-		    uart_flush_input(RS485_UART);
-		    {
-		        FlowMeterData.UART_RxCounter = 0;
-		        counterRxData = 0;
+			//5msec
+			//flush
+			//reser all counters
+
+			vTaskDelay(8 / portTICK_RATE_MS);
+			uart_flush_input(RS485_UART);
+
+			{
+				FlowMeterData.UART_RxCounter = 0;
+				counterRxData = 0;
 				readLenRxData = 0;
 			}
+
 		    RS485_send_data(E_SPP_BUFFER);
 			FlowMeterData.SPP_got_packet = false;
 		}
@@ -91,13 +121,15 @@ void RS485_tx_task(void *pvParameters)
 		//send data from TCP to UART
 		if(FlowMeterData.TCP_got_packet && is_wifi_exchaning() )
 		{
-			vTaskDelay(5 / portTICK_RATE_MS);
+
+			vTaskDelay(8 / portTICK_RATE_MS);
 			uart_flush_input(RS485_UART);
 			{
 				FlowMeterData.UART_RxCounter = 0;
 				counterRxData = 0;
 				readLenRxData = 0;
 			}
+
 			RS485_send_data(E_TCP_BUFFER);
 			FlowMeterData.TCP_got_packet = false;
 		}
@@ -139,24 +171,32 @@ void RS485_rx_task(void *pvParameters)
 			//----
 			switch (event.type) {
 			case UART_DATA:
-				//len = uart_read_bytes(RS485_UART, (uint8_t*)&FlowMeterData.UART_Buf[FlowMeterData.UART_RxCounter], event.size, (portTickType)portMAX_DELAY);
-				//FlowMeterData.UART_RxCounter += len;
-				readLenRxData = uart_read_bytes(RS485_UART,
-						(uint8_t*) &FlowMeterData.UART_Buf[counterRxData], event.size,
-						(portTickType) portMAX_DELAY);
-				if (readLenRxData == 120) {
-					/*printf(
-							"RS485_rx_task: (readLenRxData < 120 ) readLenRxData:%d, counterRxData:%d, rxData:%s\n",
-							readLenRxData, counterRxData, rxData);*/
-					counterRxData += readLenRxData;
-				} else {
-					/*printf(
-							"RS485_rx_task: readLenRxData:%d, counterRxData:%d, rxData:%s\n",
-							readLenRxData, counterRxData, rxData);*/
-					counterRxData += readLenRxData;
-					flagGetPk = 1;
-					infoLED_RS485_toggle();
-					FlowMeterData.RS485_got_packet = 1;
+				if(FlowMeterData.RS485_got_packet == 0)
+				{
+					//len = uart_read_bytes(RS485_UART, (uint8_t*)&FlowMeterData.UART_Buf[FlowMeterData.UART_RxCounter], event.size, (portTickType)portMAX_DELAY);
+					//FlowMeterData.UART_RxCounter += len;
+					readLenRxData = uart_read_bytes(RS485_UART,
+							(uint8_t*) &FlowMeterData.UART_Buf[counterRxData], event.size,
+							(portTickType) portMAX_DELAY);
+					if (readLenRxData == 120) {
+						/*printf(
+								"RS485_rx_task: (readLenRxData < 120 ) readLenRxData:%d, counterRxData:%d, rxData:%s\n",
+								readLenRxData, counterRxData, rxData);*/
+						counterRxData += readLenRxData;
+					} else {
+						/*printf(
+								"RS485_rx_task: readLenRxData:%d, counterRxData:%d, rxData:%s\n",
+								readLenRxData, counterRxData, rxData);*/
+						counterRxData += readLenRxData;
+						flagGetPk = 1;
+						infoLED_RS485_toggle();
+						FlowMeterData.RS485_got_packet = 1;
+					}
+				}
+				else
+				{
+					printf("FlowMeterData.RS485_got_packet wasnt reset\n");
+					uart_flush_input(RS485_UART);
 				}
 				break;
 				//Event of HW FIFO overflow detected
@@ -174,22 +214,32 @@ void RS485_rx_task(void *pvParameters)
 				//Event of UART RX break detected
 			case UART_BREAK:
 				ESP_LOGI(UART_TAG, "uart rx break");
+				uart_flush_input(RS485_UART);
+				xQueueReset(rs485_queue);
 				break;
 				//Event of UART parity check error
 			case UART_PARITY_ERR:
 				ESP_LOGI(UART_TAG, "uart parity error");
+				uart_flush_input(RS485_UART);
+				xQueueReset(rs485_queue);
 				break;
 				//Event of UART frame error
 			case UART_FRAME_ERR:
 				ESP_LOGI(UART_TAG, "uart frame error");
+				uart_flush_input(RS485_UART);
+				xQueueReset(rs485_queue);
 				break;
 				//UART_PATTERN_DET
 			case UART_PATTERN_DET:
 				ESP_LOGI(UART_TAG, "pattern det, event type: %d", event.type);
+				uart_flush_input(RS485_UART);
+				xQueueReset(rs485_queue);
 				break;
 				//Others
 			default:
 				ESP_LOGI(UART_TAG, "uart event type: %d", event.type);
+				uart_flush_input(RS485_UART);
+				xQueueReset(rs485_queue);
 				break;
 			}
 		}
@@ -208,17 +258,58 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 	switch (buffToSend) {
 	case E_SPP_BUFFER:
 		//uart_write_bytes(RS485_UART, (char*) FlowMeterData.SPP_Buf,	FlowMeterData.SPP_len);
-		uart_tx_chars(RS485_UART, (char*) FlowMeterData.SPP_Buf,	FlowMeterData.SPP_len);
+		if(FlowMeterData.SPP_Buf[0] == 0x24)
+		{
+			if(FlowMeterData.SPP_Buf[1] < 20)
+			{
+		      FlowMeterData.SPP_len = FlowMeterData.SPP_Buf[1];
+			  uart_tx_chars(RS485_UART, (char*) FlowMeterData.SPP_Buf,	FlowMeterData.SPP_len);
+
+			  printf("BT_TO_RS485_DATA(len:%d):\n", FlowMeterData.SPP_len);
+			  esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+			}
+			else
+			{
+				printf("Wrong BT LEN \n");
+		        esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+			}
+		}
+		else
+		{
+			printf("Wrong BT packet \n");
+			esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+		}
 		break;
 
 	case E_TCP_BUFFER:
 		//uart_write_bytes(RS485_UART, (char*) FlowMeterData.TCP_Buf,	FlowMeterData.TCP_len);
-		uart_tx_chars(RS485_UART, (char*) FlowMeterData.TCP_Buf,	FlowMeterData.TCP_len);
+		if(FlowMeterData.TCP_Buf[0] == 0x24)
+		{
+			if(FlowMeterData.TCP_Buf[1] < 20)
+			{
+				FlowMeterData.TCP_len = FlowMeterData.TCP_Buf[1];
+				uart_tx_chars(RS485_UART, (char*) FlowMeterData.TCP_Buf,	FlowMeterData.TCP_len);
+				printf("TCP_TO_RS485_DATA(len:%d):\n",FlowMeterData.TCP_len);
+				esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
+			}
+			else
+		   {
+			  printf("Wrong WIFI LEN \n");
+			  esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
+		   }
+		}
+		else
+		{
+			printf("Wrong WiFi packet \n");
+			esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
+		}
 		break;
 
 	case E_UART_BUFFER:
 		//uart_write_bytes(RS485_UART, (char*) FlowMeterData.UART_Buf, FlowMeterData.UART_len);
 		uart_tx_chars(RS485_UART, (char*) FlowMeterData.UART_Buf, FlowMeterData.UART_len);
+		printf("UART_DATA(len:%d):\n",FlowMeterData.UART_len);
+		esp_log_buffer_hex("", FlowMeterData.UART_Buf, FlowMeterData.UART_len);
 		break;
 
 	default:
@@ -228,7 +319,9 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 	//vTaskDelay(5 / portTICK_PERIOD_MS); // osc - 200 us
 	//vTaskDelay(20 / portTICK_PERIOD_MS); // baudrate 9600
 	//vTaskDelay(10 / portTICK_PERIOD_MS); // baudrate 115200
-	uart_wait_tx_done(RS485_UART, 20 / portTICK_PERIOD_MS);
+	uart_wait_tx_done(RS485_UART, 10 / portTICK_PERIOD_MS);
+	//vTaskDelay( 2 / portTICK_PERIOD_MS);
+	for(uint16_t i = 0; i < 1000; i++) {} ;
 	gpio_set_level(RS485_RE, 0);
 	gpio_set_level(RS485_DE, 0);
 }
