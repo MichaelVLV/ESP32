@@ -150,7 +150,7 @@ void tcp_server_task(void *pvParameters)
 		if (len > 0)
 		{
 			memcpy(FlowMeterData.TCP_Buf, databuff, FlowMeterData.TCP_len);
-			printf("FL_len:%d, FL_data:%s\n", FlowMeterData.TCP_len, FlowMeterData.TCP_Buf); // debug
+			printf("TCP(FLAG==1): FL_len:%d, FL_data:%s\n", FlowMeterData.TCP_len, FlowMeterData.TCP_Buf); // debug
 			FlowMeterData.TCP_got_packet = true;
 			infoLED_WIFI_toggle();
 		}
