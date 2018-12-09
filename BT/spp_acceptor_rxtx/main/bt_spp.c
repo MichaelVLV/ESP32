@@ -20,7 +20,7 @@ uint32_t gl_spp_handle;
 void SPP_to_UART_write(esp_spp_cb_param_t *param)
 {
 	esp_spp_write(param->write.handle, FlowMeterData.UART_len,(uint8_t *) FlowMeterData.UART_Buf);
-	ESP_LOGI(SPP_TAG, "SPP_to_UART_write len:%d\n data:%s",	FlowMeterData.UART_len, (uint8_t * )FlowMeterData.UART_Buf);
+	//ESP_LOGI(SPP_TAG, "SPP_to_UART_write len:%d\n data:%s",	FlowMeterData.UART_len, (uint8_t * )FlowMeterData.UART_Buf);
 }
 
 void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
@@ -54,7 +54,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 		ESP_LOGI(SPP_TAG, "ESP_SPP_CL_INIT_EVT");
 		break;
 	case ESP_SPP_DATA_IND_EVT:
-		ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len=%d handle=%d",param->data_ind.len, param->data_ind.handle);
+		//ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len=%d handle=%d",param->data_ind.len, param->data_ind.handle);
 		if (param->data_ind.len < 1023) {
 //		    snprintf(buf, (size_t)param->data_ind.len, (char *)param->data_ind.data);
 //		    printf("%s\n", buf); //debug
@@ -63,6 +63,7 @@ void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 
 			memcpy(FlowMeterData.SPP_Buf, param->data_ind.data,(size_t) param->data_ind.len);
 			FlowMeterData.SPP_len = param->data_ind.len;
+			printf("BT(FLAG==1): FL_len:%d, FL_data:%s\n", FlowMeterData.SPP_len, FlowMeterData.SPP_Buf); // debug
 			FlowMeterData.SPP_got_packet = true;
 			infoLED_BT_toggle();
 			// this part send data only if some SPP data received
