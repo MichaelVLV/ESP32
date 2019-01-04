@@ -95,6 +95,7 @@ void RS485_tx_task(void *pvParameters)
 				}
 
 			}
+			printf("%s: FlowMeterData.RS485_got_packet = 0 (line %d)", __func__, __LINE__);
 			FlowMeterData.RS485_got_packet = 0;
 		}
 
@@ -124,6 +125,7 @@ void RS485_tx_task(void *pvParameters)
 
 			vTaskDelay(8 / portTICK_RATE_MS);
 			uart_flush_input(RS485_UART);
+
 			{
 				FlowMeterData.UART_RxCounter = 0;
 				counterRxData = 0;
@@ -252,6 +254,7 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 	gpio_set_level(RS485_RE, 1);
 	gpio_set_level(RS485_DE, 1);
 
+	esp_err_t ret;
 	//vTaskDelay(20 / portTICK_PERIOD_MS); // baudrate 9600
 	//vTaskDelay(10 / portTICK_PERIOD_MS); // baudrate 115200
 
@@ -260,23 +263,41 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 		//uart_write_bytes(RS485_UART, (char*) FlowMeterData.SPP_Buf,	FlowMeterData.SPP_len);
 		if(FlowMeterData.SPP_Buf[0] == 0x24)
 		{
-			if(FlowMeterData.SPP_Buf[1] < 20)
+			//if(FlowMeterData.SPP_Buf[1] < 20)
 			{
 		      FlowMeterData.SPP_len = FlowMeterData.SPP_Buf[1];
-			  uart_tx_chars(RS485_UART, (char*) FlowMeterData.SPP_Buf,	FlowMeterData.SPP_len);
 
+		      if(FlowMeterData.SPP_len > 128)
+		      {
+				  printf("%s: FlowMeterData.SPP_len > 128 \n", __func__);
+				  uart_tx_chars(RS485_UART, (char*) FlowMeterData.SPP_Buf, 128);
+				  vTaskDelay(10 / portTICK_PERIOD_MS);
+//				  ret = uart_wait_tx_done(RS485_UART, 10 / portTICK_PERIOD_MS);
+//				  if(ret == ESP_ERR_TIMEOUT)
+//				  {
+//					  printf("uart_wait_tx_done TIMEOUT (line %d) \n", __LINE__);
+//				  }
+				  printf("%s: REST LEN = %d (line %d)\n", __func__, (FlowMeterData.SPP_len - 128), __LINE__);
+				  uart_tx_chars(RS485_UART, (char*) &FlowMeterData.SPP_Buf[128], (FlowMeterData.SPP_len - 128) );
+		      }
+		      else
+		      {
+		    	  uart_tx_chars(RS485_UART, (char*) FlowMeterData.SPP_Buf,	FlowMeterData.SPP_len);
+		      }
 			  printf("BT_TO_RS485_DATA(len:%d):\n", FlowMeterData.SPP_len);
 			  esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
 			}
-			else
+			//else
 			{
-				printf("Wrong BT LEN \n");
-		        esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
+//				printf("Wrong BT LEN \n");
+//				printf("FlowMeterData.SPP_Buf[1]: 0x%X(%d)\n",FlowMeterData.SPP_Buf[1], FlowMeterData.SPP_Buf[1]);
+//		        esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
 			}
 		}
 		else
 		{
 			printf("Wrong BT packet \n");
+			printf("FlowMeterData.SPP_Buf[0]: 0x%X(%d)\n",FlowMeterData.SPP_Buf[0], FlowMeterData.SPP_Buf[0]);
 			esp_log_buffer_hex("", FlowMeterData.SPP_Buf, FlowMeterData.SPP_len);
 		}
 		break;
@@ -285,22 +306,44 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 		//uart_write_bytes(RS485_UART, (char*) FlowMeterData.TCP_Buf,	FlowMeterData.TCP_len);
 		if(FlowMeterData.TCP_Buf[0] == 0x24)
 		{
-			if(FlowMeterData.TCP_Buf[1] < 20)
+			//if(FlowMeterData.TCP_Buf[1] < 20)
 			{
 				FlowMeterData.TCP_len = FlowMeterData.TCP_Buf[1];
-				uart_tx_chars(RS485_UART, (char*) FlowMeterData.TCP_Buf,	FlowMeterData.TCP_len);
+				printf("%s: FlowMeterData.TCP_len = %d (line %d)\n", __func__, FlowMeterData.TCP_len, __LINE__);
+				if(FlowMeterData.TCP_len > 128)
+				{
+					printf("%s: FlowMeterData.TCP_len > 128 \n", __func__);
+					uart_tx_chars(RS485_UART, (char*) FlowMeterData.TCP_Buf, 128);
+					vTaskDelay(10 / portTICK_PERIOD_MS);
+//					ret = uart_wait_tx_done(RS485_UART, 10 / portTICK_PERIOD_MS);
+//					if(ret == ESP_ERR_TIMEOUT)
+//					{
+//						printf("uart_wait_tx_done TIMEOUT (line %d) \n", __LINE__);
+//					}
+					printf("%s: REST LEN = %d (line %d)\n", __func__, (FlowMeterData.TCP_len - 128), __LINE__);
+					uart_tx_chars(RS485_UART, (char*) &FlowMeterData.TCP_Buf[128], (FlowMeterData.TCP_len - 128) );
+
+				}
+				else
+				{
+					uart_tx_chars(RS485_UART, (char*) FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
+					printf("%s: FlowMeterData.TCP_len less 128 \n", __func__);
+				}
+
 				printf("TCP_TO_RS485_DATA(len:%d):\n",FlowMeterData.TCP_len);
 				esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
 			}
-			else
+			//else
 		   {
-			  printf("Wrong WIFI LEN \n");
-			  esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
+//			  printf("Wrong WIFI LEN \n");
+//				printf("FlowMeterData.TCP_Buf[1]: 0x%X(%d)\n",FlowMeterData.TCP_Buf[1], FlowMeterData.TCP_Buf[1]);
+//			  esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
 		   }
 		}
 		else
 		{
 			printf("Wrong WiFi packet \n");
+			printf("FlowMeterData.TCP_Buf[0]: 0x%X(%d)\n",FlowMeterData.TCP_Buf[0], FlowMeterData.TCP_Buf[0]);
 			esp_log_buffer_hex("", FlowMeterData.TCP_Buf, FlowMeterData.TCP_len);
 		}
 		break;
@@ -319,7 +362,12 @@ void RS485_send_data(RS485_DataBuffer_t buffToSend)
 	//vTaskDelay(5 / portTICK_PERIOD_MS); // osc - 200 us
 	//vTaskDelay(20 / portTICK_PERIOD_MS); // baudrate 9600
 	//vTaskDelay(10 / portTICK_PERIOD_MS); // baudrate 115200
-	uart_wait_tx_done(RS485_UART, 10 / portTICK_PERIOD_MS);
+	//uart_wait_tx_done(RS485_UART, 10 / portTICK_PERIOD_MS);
+	ret = uart_wait_tx_done(RS485_UART, 10 / portTICK_PERIOD_MS);
+	if(ret == ESP_ERR_TIMEOUT)
+	{
+		printf("uart_wait_tx_done TIMEOUT (line %d) \n", __LINE__);
+	}
 	//vTaskDelay( 2 / portTICK_PERIOD_MS);
 	for(uint16_t i = 0; i < 1000; i++) {} ;
 	gpio_set_level(RS485_RE, 0);
